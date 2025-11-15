@@ -1,0 +1,13 @@
+venv/
+GAN/models/
+GAN/data/
+GAN/reports/
+*.pkl
+*.parquet
+*.csv
+*.json
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+mlruns/
+wandb/
