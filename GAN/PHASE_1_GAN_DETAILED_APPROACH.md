@@ -942,3 +942,457 @@ project/
 ---
 
 **🎉 Phase 1 Complete! Ready for Phase 2: ML Model Training**
+
+---
+
+## PHASE 1.5: Adding New Machines to System
+**Duration:** ~2-3 hours per new machine  
+**Goal:** Streamlined workflow to add new machine profiles and generate synthetic data
+
+### Overview
+Phase 1.5 is the **bridge between Phase 1 and Phase 2** - it enables scaling the system to new machines without starting from scratch. This workflow is executed whenever:
+- Client requests predictive maintenance for a new machine type
+- Expanding coverage to additional equipment
+- Adding machines not in the original 21-machine dataset
+
+---
+
+### Phase 1.5.1: Machine Profile Creation (30-45 minutes)
+
+**Step 1: Gather Machine Information**
+
+Collect technical specifications:
+- Equipment details (manufacturer, model, category)
+- Operating parameters (power rating, speed, voltage, pressure)
+- Sensor configuration (temperature, vibration, current, etc.)
+- Maintenance history and failure modes
+- Operating environment conditions
+
+**Step 2: Create Metadata JSON**
+
+Location: `GAN/metadata/{machine_category}_{manufacturer}_{model}_{id}_metadata.json`
+
+```json
+{
+  "machine_id": "pump_xyzbrand_model123_022",
+  "category": "pump",
+  "manufacturer": "XYZBrand",
+  "model": "Model123",
+  "specifications": {
+    "power_kw": 15.0,
+    "rated_speed_rpm": 2900,
+    "voltage": 400,
+    "flow_rate_m3h": 50,
+    "head_m": 80
+  },
+  "sensors": [
+    {
+      "name": "pump_bearing_temp_C",
+      "type": "temperature",
+      "unit": "°C",
+      "normal_range": [35, 65],
+      "warning_threshold": 75,
+      "critical_threshold": 85,
+      "sampling_rate_hz": 1
+    },
+    {
+      "name": "pump_vibration_mm_s",
+      "type": "vibration",
+      "unit": "mm/s",
+      "normal_range": [0.5, 4.5],
+      "warning_threshold": 7.0,
+      "critical_threshold": 11.0,
+      "sampling_rate_hz": 10
+    }
+    // ... add all sensors
+  ],
+  "failure_modes": [
+    "bearing_wear",
+    "seal_leakage",
+    "impeller_damage",
+    "cavitation"
+  ],
+  "maintenance_schedule": {
+    "inspection_interval_hours": 500,
+    "major_overhaul_hours": 8000
+  }
+}
+```
+
+**Validation Checklist:**
+- ✅ All sensor ranges defined (normal, warning, critical)
+- ✅ Operating parameters complete
+- ✅ Failure modes documented
+- ✅ JSON syntax valid (use validator)
+- ✅ Naming convention consistent: `{category}_{manufacturer}_{model}_{id}`
+
+---
+
+### Phase 1.5.2: TVAE Model Training (1.5-2 hours)
+
+**Step 1: Prepare Training Configuration**
+
+```python
+# GAN/config/tvae_config.py
+# Add new machine to training list
+
+NEW_MACHINE_CONFIG = {
+    'machine_id': 'pump_xyzbrand_model123_022',
+    'metadata_file': 'metadata/pump_xyzbrand_model123_022_metadata.json',
+    'output_dir': 'data/synthetic/pump_xyzbrand_model123_022',
+    'epochs': 300,
+    'batch_size': 500,
+    'embedding_dim': 128,
+    'compress_dims': (128, 128),
+    'decompress_dims': (128, 128)
+}
+```
+
+**Step 2: Train TVAE Model**
+
+```powershell
+# Navigate to GAN folder
+cd GAN
+
+# Activate virtual environment
+..\venv\Scripts\Activate.ps1
+
+# Train TVAE for new machine
+python scripts/train_single_machine_tvae.py --machine_id pump_xyzbrand_model123_022 --epochs 300
+
+# Expected output:
+# ✅ TVAE model trained: models/tvae/pump_xyzbrand_model123_022/model.pkl
+# ✅ Training time: ~1.5-2 hours
+# ✅ Quality report: reports/pump_xyzbrand_model123_022_tvae_quality_report.json
+```
+
+**Training Monitoring:**
+- Reconstruction loss should decrease steadily
+- Convergence typically around epoch 250-300
+- GPU usage: ~80-90% (RTX 4070)
+- RAM usage: ~3-4 GB
+
+---
+
+### Phase 1.5.3: Synthetic Data Generation (15-30 minutes)
+
+**Step 1: Generate Samples**
+
+```powershell
+# Generate 50,000 synthetic samples
+python scripts/generate_synthetic_data.py \
+    --machine_id pump_xyzbrand_model123_022 \
+    --num_samples 50000 \
+    --output_dir data/synthetic/pump_xyzbrand_model123_022
+
+# Expected output:
+# ✅ Generated 50,000 samples
+# ✅ train.parquet: 35,000 samples (70%)
+# ✅ val.parquet: 7,500 samples (15%)
+# ✅ test.parquet: 7,500 samples (15%)
+# ✅ Generation time: ~15-30 minutes
+```
+
+**Step 2: Quality Validation**
+
+```python
+# Validate synthetic data quality
+python scripts/validate_synthetic_quality.py \
+    --machine_id pump_xyzbrand_model123_022 \
+    --metadata_file metadata/pump_xyzbrand_model123_022_metadata.json
+
+# Quality checks:
+# ✅ Sensor values within normal ranges (95%+)
+# ✅ Statistical distribution matches metadata
+# ✅ No missing values
+# ✅ Correlations between sensors realistic
+# ✅ Temporal patterns plausible
+```
+
+**Deliverables:**
+- ✅ `data/synthetic/pump_xyzbrand_model123_022/train.parquet`
+- ✅ `data/synthetic/pump_xyzbrand_model123_022/val.parquet`
+- ✅ `data/synthetic/pump_xyzbrand_model123_022/test.parquet`
+- ✅ `reports/pump_xyzbrand_model123_022_tvae_quality_report.json`
+- ✅ `models/tvae/pump_xyzbrand_model123_022/model.pkl`
+
+---
+
+### Phase 1.5.4: Integration with Phase 2 ML Training
+
+Once Phase 1.5 completes, the new machine is ready for ML model training (Phase 2):
+
+```
+✅ Phase 1.5 Complete: Synthetic data ready
+       ↓
+Phase 2.2: Train Classification Model (~1h)
+       ↓
+Phase 2.3: Train Regression Model (~1h)
+       ↓
+Phase 2.4: Train Anomaly Model (~15min)
+       ↓
+Phase 2.5: Train Time-Series Model (~1h)
+       ↓
+✅ New Machine Fully Operational (~6 hours total)
+```
+
+**Command Sequence:**
+```powershell
+# After Phase 1.5 completes, train 4 ML models
+cd ../ml_models
+
+# Classification
+python scripts/train_classification.py --machine_id pump_xyzbrand_model123_022
+
+# Regression (RUL)
+python scripts/train_regression.py --machine_id pump_xyzbrand_model123_022
+
+# Anomaly Detection
+python scripts/train_anomaly.py --machine_id pump_xyzbrand_model123_022
+
+# Time-Series Forecasting
+python scripts/train_timeseries.py --machine_id pump_xyzbrand_model123_022
+```
+
+---
+
+### Phase 1.5 Checklist (Per New Machine)
+
+**Planning Phase:**
+- [ ] Gather machine specifications and sensor details
+- [ ] Document failure modes and maintenance schedule
+- [ ] Confirm sensor naming conventions
+- [ ] Validate operating parameter ranges
+
+**Execution Phase:**
+- [ ] Create metadata JSON file
+- [ ] Validate JSON syntax and completeness
+- [ ] Train TVAE model (~1.5-2h)
+- [ ] Monitor training convergence
+- [ ] Generate 50K synthetic samples (~30min)
+- [ ] Validate synthetic data quality
+- [ ] Save quality report
+
+**Integration Phase:**
+- [ ] Verify data files in correct directory structure
+- [ ] Update machine list in Phase 2 config
+- [ ] Train 4 ML models (Phase 2.2-2.5) (~4h)
+- [ ] Validate ML model performance
+- [ ] Update API routing for new machine
+
+**Total Time: ~6 hours** (Phase 1.5: 2h + Phase 2: 4h)
+
+---
+
+### Scaling Considerations
+
+**Adding Multiple Machines:**
+```powershell
+# Batch process for multiple new machines
+python scripts/batch_add_machines.py \
+    --metadata_dir metadata/new_machines/ \
+    --num_samples 50000 \
+    --parallel 3
+
+# Trains 3 machines in parallel (GPU capacity permitting)
+# Time: ~2-3 hours for 3 machines (vs 6 hours sequential)
+```
+
+**Resource Requirements (Per Machine):**
+- GPU: RTX 4070 or better (TVAE training)
+- RAM: 8 GB minimum, 16 GB recommended
+- Storage: 500 MB per machine (synthetic data + models)
+- Time: 2 hours (Phase 1.5) + 4 hours (Phase 2) = 6 hours total
+
+**Maintenance:**
+- TVAE models: Retrain every 6-12 months (data drift)
+- ML models: Retrain quarterly with new failure patterns
+- Metadata: Update when machine specifications change
+- Quality validation: Run monthly to detect degradation
+
+---
+
+## Future Scope & Enhancements
+
+### Phase 1 Enhancements (GAN Improvements)
+
+#### 1. **Real Data Integration** (Priority: HIGH)
+**Current:** 100% synthetic data from TVAE  
+**Target:** Hybrid approach with real sensor data
+
+**Implementation:**
+```python
+# Phase 1.6: Real Data Acquisition
+# - Connect to SCADA/IoT data sources
+# - Collect 3-6 months of real sensor readings
+# - Use real data to fine-tune TVAE models
+# - Generate synthetic data that better matches reality
+```
+
+**Benefits:**
+- More realistic failure patterns
+- Better model accuracy in production
+- Reduced data drift issues
+- Validation against ground truth
+
+**Timeline:** 2-3 months (data collection + TVAE retraining)
+
+---
+
+#### 2. **Advanced GAN Architectures** (Priority: MEDIUM)
+**Current:** TVAE (Tabular Variational Autoencoder)  
+**Upgrade Options:**
+
+**Option A: CTGAN (Conditional Tabular GAN)**
+- Better for highly imbalanced data
+- Superior failure mode generation
+- Implementation: Already in codebase, needs activation
+
+**Option B: TimeGAN**
+- Specialized for time-series data
+- Preserves temporal correlations better
+- Ideal for forecasting models
+
+**Option C: Hybrid Approach**
+```python
+# Use TVAE for normal operation data
+# Use CTGAN for failure scenarios
+# Combine both for balanced dataset
+```
+
+**Timeline:** 1-2 weeks per architecture test
+
+---
+
+#### 3. **Automated Metadata Generation** (Priority: MEDIUM)
+**Current:** Manual JSON creation  
+**Target:** AI-assisted metadata generation
+
+**Implementation:**
+```python
+# Phase 1.7: Metadata Automation
+# Input: Equipment datasheet PDF, manufacturer specs
+# Process: 
+#   - OCR + LLM extraction (GPT-4/Claude)
+#   - Parse technical specifications
+#   - Infer sensor ranges from domain knowledge
+#   - Generate JSON metadata automatically
+# Output: 80% complete metadata (requires human review)
+```
+
+**Benefits:**
+- Reduce Phase 1.5 time from 2h to 30 minutes
+- Minimize human error in metadata
+- Standardize sensor naming conventions
+- Scale to 50+ machines faster
+
+**Timeline:** 2-3 weeks development
+
+---
+
+#### 4. **Failure Scenario Simulation** (Priority: HIGH)
+**Current:** Simple threshold-based failure labels  
+**Target:** Physics-based failure progression
+
+**Implementation:**
+```python
+# Phase 1.8: Physics-Informed Failure Generation
+# Bearing wear progression:
+#   - Start: Normal vibration (2 mm/s)
+#   - Week 1-4: Gradual increase (2 → 4 mm/s)
+#   - Week 5-8: Accelerated wear (4 → 7 mm/s)
+#   - Week 9: Critical failure (7 → 12 mm/s)
+# Include temperature rise, frequency changes, etc.
+```
+
+**Benefits:**
+- Realistic failure progression (not sudden jumps)
+- Better RUL prediction models
+- Identify early warning signs
+- Realistic maintenance scheduling
+
+**Timeline:** 3-4 weeks (requires domain expertise)
+
+---
+
+#### 5. **Multi-Machine Dependency Modeling** (Priority: LOW)
+**Current:** Each machine independent  
+**Target:** Model machine interactions (e.g., pump → cooling tower)
+
+**Use Case:**
+- Pump failure affects cooling tower performance
+- Compressor downtime impacts production line
+- Cascading failure scenarios
+
+**Timeline:** 4-6 weeks (complex interdependencies)
+
+---
+
+### Data Quality & Validation
+
+#### 6. **Continuous Quality Monitoring** (Priority: MEDIUM)
+**Implementation:**
+```python
+# Automated quality dashboard
+# - Monthly TVAE quality checks
+# - Synthetic vs real data divergence tracking
+# - Alert when quality drops below threshold
+# - Auto-retrain TVAE when needed
+```
+
+**Timeline:** 1-2 weeks
+
+---
+
+#### 7. **Data Augmentation Strategies** (Priority: MEDIUM)
+**Techniques:**
+- SMOTE for failure class balancing
+- Mixup for smoother decision boundaries
+- Time warping for time-series robustness
+- Noise injection for sensor fault tolerance
+
+**Timeline:** 2-3 weeks
+
+---
+
+### Optimization & Performance
+
+#### 8. **Faster TVAE Training** (Priority: MEDIUM)
+**Current:** 1.5-2 hours per machine  
+**Optimizations:**
+- Mixed precision training (FP16)
+- Gradient accumulation
+- Distributed training (multi-GPU)
+- Hyperparameter auto-tuning
+
+**Target:** <45 minutes per machine  
+**Timeline:** 1-2 weeks
+
+---
+
+#### 9. **On-Demand Generation** (Priority: LOW)
+**Current:** Pre-generate 50K samples  
+**Target:** Generate samples on-the-fly during ML training
+
+**Benefits:**
+- Reduced storage (500 MB → 50 MB per machine)
+- Always fresh data (no staleness)
+- Infinite dataset size
+
+**Timeline:** 2-3 weeks
+
+---
+
+### Documentation & Tools
+
+#### 10. **Interactive Configuration Tool** (Priority: LOW)
+**Implementation:**
+```python
+# Web-based metadata creator
+# - Form-based input (no JSON editing)
+# - Real-time validation
+# - Sensor range suggestions from similar machines
+# - Preview synthetic data before full generation
+```
+
+**Timeline:** 2-3 weeks (web development)

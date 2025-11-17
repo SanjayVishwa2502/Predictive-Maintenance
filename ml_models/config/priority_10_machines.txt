@@ -1,0 +1,14 @@
+# Priority 10 Machines for Per-Machine Model Training
+# Created: 2025-11-17
+# Phase 2.2.2: Classification Models
+
+motor_siemens_1la7_001
+motor_abb_m3bp_002
+motor_weg_w22_003
+pump_grundfos_cr3_004
+pump_flowserve_ansi_005
+compressor_atlas_copco_ga30_001
+compressor_ingersoll_rand_2545_009
+cnc_dmg_mori_nlx_010
+hydraulic_beckwood_press_011
+cooling_tower_bac_vti_018
