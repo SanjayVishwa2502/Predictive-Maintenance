@@ -1,0 +1,130 @@
+{
+  "timestamp": "2025-11-18T12:39:49.180568",
+  "total_machines": 10,
+  "successful": 10,
+  "failed": 0,
+  "total_time_minutes": 1.815279523531596,
+  "average_time_per_machine_minutes": 0.1815279523531596,
+  "results": [
+    {
+      "machine_id": "motor_siemens_1la7_001",
+      "status": "success",
+      "best_model": "one_class_svm",
+      "f1_score": 0.761418853255588,
+      "accuracy": 0.8690666666666667,
+      "precision": 0.7291763610981852,
+      "recall": 0.7966446365022878,
+      "model_size_mb": 1.0408010482788086,
+      "n_features": 38,
+      "training_time_minutes": 0.1780807336171468
+    },
+    {
+      "machine_id": "motor_abb_m3bp_002",
+      "status": "success",
+      "best_model": "one_class_svm",
+      "f1_score": 0.6950880444856349,
+      "accuracy": 0.9122666666666667,
+      "precision": 0.5326704545454546,
+      "recall": 1.0,
+      "model_size_mb": 0.7260427474975586,
+      "n_features": 22,
+      "training_time_minutes": 0.20517924229303997
+    },
+    {
+      "machine_id": "motor_weg_w22_003",
+      "status": "success",
+      "best_model": "one_class_svm",
+      "f1_score": 0.6573181419807187,
+      "accuracy": 0.8957333333333334,
+      "precision": 0.489556135770235,
+      "recall": 1.0,
+      "model_size_mb": 0.8166952133178711,
+      "n_features": 22,
+      "training_time_minutes": 0.22126707633336384
+    },
+    {
+      "machine_id": "pump_grundfos_cr3_004",
+      "status": "success",
+      "best_model": "one_class_svm",
+      "f1_score": 0.6931608133086876,
+      "accuracy": 0.9114666666666666,
+      "precision": 0.5304101838755304,
+      "recall": 1.0,
+      "model_size_mb": 0.6934194564819336,
+      "n_features": 22,
+      "training_time_minutes": 0.19529964129130045
+    },
+    {
+      "machine_id": "pump_flowserve_ansi_005",
+      "status": "success",
+      "best_model": "one_class_svm",
+      "f1_score": 0.6744604316546763,
+      "accuracy": 0.9034666666666666,
+      "precision": 0.508819538670285,
+      "recall": 1.0,
+      "model_size_mb": 0.4870138168334961,
+      "n_features": 14,
+      "training_time_minutes": 0.17821566263834634
+    },
+    {
+      "machine_id": "compressor_atlas_copco_ga30_001",
+      "status": "success",
+      "best_model": "one_class_svm",
+      "f1_score": 0.8029326816263053,
+      "accuracy": 0.8817333333333334,
+      "precision": 0.749792531120332,
+      "recall": 0.8641798182687709,
+      "model_size_mb": 0.6386251449584961,
+      "n_features": 26,
+      "training_time_minutes": 0.14868648449579874
+    },
+    {
+      "machine_id": "compressor_ingersoll_rand_2545_009",
+      "status": "success",
+      "best_model": "one_class_svm",
+      "f1_score": 0.823772915434654,
+      "accuracy": 0.9205333333333333,
+      "precision": 0.7003519356460532,
+      "recall": 1.0,
+      "model_size_mb": 0.4712057113647461,
+      "n_features": 17,
+      "training_time_minutes": 0.16078200737635295
+    },
+    {
+      "machine_id": "cnc_dmg_mori_nlx_010",
+      "status": "success",
+      "best_model": "one_class_svm",
+      "f1_score": 0.6925207756232687,
+      "accuracy": 0.9112,
+      "precision": 0.5296610169491526,
+      "recall": 1.0,
+      "model_size_mb": 0.3665151596069336,
+      "n_features": 11,
+      "training_time_minutes": 0.19889329274495443
+    },
+    {
+      "machine_id": "hydraulic_beckwood_press_011",
+      "status": "success",
+      "best_model": "isolation_forest",
+      "f1_score": 0.8202764976958525,
+      "accuracy": 0.9168,
+      "precision": 0.7046016823354775,
+      "recall": 0.9813921433494142,
+      "model_size_mb": 1.2909021377563477,
+      "n_features": 18,
+      "training_time_minutes": 0.16004852056503296
+    },
+    {
+      "machine_id": "cooling_tower_bac_vti_018",
+      "status": "success",
+      "best_model": "isolation_forest",
+      "f1_score": 0.6852444038373686,
+      "accuracy": 0.9081333333333333,
+      "precision": 0.5211952744961779,
+      "recall": 1.0,
+      "model_size_mb": 1.6508722305297852,
+      "n_features": 10,
+      "training_time_minutes": 0.1685339093208313
+    }
+  ]
+}

@@ -11,9 +11,10 @@ This document outlines the future enhancements and production roadmap for the Pr
 
 **Current Status:**
 - ✅ Phase 1: 21 machines with synthetic data (TVAE-based)
-- 🔄 Phase 2: Training 40 models for 10 priority machines
-- 📋 Phase 1.5: New machine workflow documented
-- 🎯 Next: Production deployment & enhancements
+- ⚠️ Phase 1.5: **BLOCKED** - RUL label generation required (assigned to colleague)
+- ✅ Phase 2.2.2: Classification models complete (10/10 machines, F1=0.77)
+- ⚠️ Phase 2.3.1: **BLOCKED** - Regression requires RUL labels in GAN data
+- 🎯 Next: Complete RUL generation → Resume regression training
 
 ---
 

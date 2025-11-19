@@ -1,0 +1,209 @@
+====================================================================================================
+COMPREHENSIVE ANOMALY DETECTION VALIDATION REPORT
+Machine: motor_siemens_1la7_001
+Timestamp: 2025-11-18 13:04:06
+====================================================================================================
+
+📊 EXECUTIVE SUMMARY
+----------------------------------------------------------------------------------------------------
+Total Detectors Evaluated: 8
+Best Model: one_class_svm
+Best F1 Score: 0.6768
+Total Training Time: 0.45 minutes
+Test Samples: 7500
+Test Anomalies: 1967 (26.2%)
+
+🏆 MODEL RANKINGS (by F1 Score)
+----------------------------------------------------------------------------------------------------
+Rank   Model                          F1         Precision    Recall     Accuracy   ROC-AUC   
+----------------------------------------------------------------------------------------------------
+1      one_class_svm                  0.6768     0.7010       0.6543     0.8361     0.1079    
+2      ensemble_voting                0.6728     0.7147       0.6355     0.8379     0.1078    
+3      isolation_forest               0.6412     0.6878       0.6004     0.8237     0.1048    
+4      lof                            0.6330     0.6832       0.5897     0.8207     0.1447    
+5      zscore                         0.6234     0.6396       0.6080     0.8073     0.8590    
+6      modified_zscore                0.6030     0.4316       1.0000     0.6547     0.9758    
+7      elliptic_envelope              0.4046     0.5448       0.3218     0.7516     0.2044    
+8      iqr                            0.0000     0.0000       0.0000     0.7377     0.7463    
+
+📋 DETAILED MODEL ANALYSIS
+====================================================================================================
+
+Model: ONE_CLASS_SVM
+----------------------------------------------------------------------------------------------------
+Performance Metrics:
+  • F1 Score:        0.6768
+  • Precision:       0.7010
+  • Recall:          0.6543
+  • Accuracy:        0.8361
+  • Specificity:     0.9008
+  • ROC-AUC:         0.1079
+  • Avg Precision:   0.1514
+
+Confusion Matrix:
+  True Negatives:      4984
+  False Positives:      549
+  False Negatives:      680
+  True Positives:      1287
+
+Training Time:       7.28 seconds
+
+Model: ENSEMBLE_VOTING
+----------------------------------------------------------------------------------------------------
+Performance Metrics:
+  • F1 Score:        0.6728
+  • Precision:       0.7147
+  • Recall:          0.6355
+  • Accuracy:        0.8379
+  • Specificity:     0.9098
+  • ROC-AUC:         0.1078
+  • Avg Precision:   0.1513
+
+Confusion Matrix:
+  True Negatives:      5034
+  False Positives:      499
+  False Negatives:      717
+  True Positives:      1250
+
+Training Time:       0.00 seconds
+
+Model: ISOLATION_FOREST
+----------------------------------------------------------------------------------------------------
+Performance Metrics:
+  • F1 Score:        0.6412
+  • Precision:       0.6878
+  • Recall:          0.6004
+  • Accuracy:        0.8237
+  • Specificity:     0.9031
+  • ROC-AUC:         0.1048
+  • Avg Precision:   0.1524
+
+Confusion Matrix:
+  True Negatives:      4997
+  False Positives:      536
+  False Negatives:      786
+  True Positives:      1181
+
+Training Time:       0.51 seconds
+
+Model: LOF
+----------------------------------------------------------------------------------------------------
+Performance Metrics:
+  • F1 Score:        0.6330
+  • Precision:       0.6832
+  • Recall:          0.5897
+  • Accuracy:        0.8207
+  • Specificity:     0.9028
+  • ROC-AUC:         0.1447
+  • Avg Precision:   0.1545
+
+Confusion Matrix:
+  True Negatives:      4995
+  False Positives:      538
+  False Negatives:      807
+  True Positives:      1160
+
+Training Time:       3.60 seconds
+
+Model: ZSCORE
+----------------------------------------------------------------------------------------------------
+Performance Metrics:
+  • F1 Score:        0.6234
+  • Precision:       0.6396
+  • Recall:          0.6080
+  • Accuracy:        0.8073
+  • Specificity:     0.8782
+  • ROC-AUC:         0.8590
+  • Avg Precision:   0.7222
+
+Confusion Matrix:
+  True Negatives:      4859
+  False Positives:      674
+  False Negatives:      771
+  True Positives:      1196
+
+Training Time:       0.01 seconds
+
+Model: MODIFIED_ZSCORE
+----------------------------------------------------------------------------------------------------
+Performance Metrics:
+  • F1 Score:        0.6030
+  • Precision:       0.4316
+  • Recall:          1.0000
+  • Accuracy:        0.6547
+  • Specificity:     0.5319
+  • ROC-AUC:         0.9758
+  • Avg Precision:   0.9180
+
+Confusion Matrix:
+  True Negatives:      2943
+  False Positives:     2590
+  False Negatives:        0
+  True Positives:      1967
+
+Training Time:       0.04 seconds
+
+Model: ELLIPTIC_ENVELOPE
+----------------------------------------------------------------------------------------------------
+Performance Metrics:
+  • F1 Score:        0.4046
+  • Precision:       0.5448
+  • Recall:          0.3218
+  • Accuracy:        0.7516
+  • Specificity:     0.9044
+  • ROC-AUC:         0.2044
+  • Avg Precision:   0.1639
+
+Confusion Matrix:
+  True Negatives:      5004
+  False Positives:      529
+  False Negatives:     1334
+  True Positives:       633
+
+Training Time:       3.64 seconds
+
+Model: IQR
+----------------------------------------------------------------------------------------------------
+Performance Metrics:
+  • F1 Score:        0.0000
+  • Precision:       0.0000
+  • Recall:          0.0000
+  • Accuracy:        0.7377
+  • Specificity:     1.0000
+  • ROC-AUC:         0.7463
+  • Avg Precision:   0.5380
+
+Confusion Matrix:
+  True Negatives:      5533
+  False Positives:        0
+  False Negatives:     1967
+  True Positives:         0
+
+Training Time:       0.05 seconds
+
+⏱️  TRAINING TIME ANALYSIS
+----------------------------------------------------------------------------------------------------
+ensemble_voting                    0.00 seconds
+zscore                             0.01 seconds
+modified_zscore                    0.04 seconds
+iqr                                0.05 seconds
+isolation_forest                   0.51 seconds
+lof                                3.60 seconds
+elliptic_envelope                  3.64 seconds
+one_class_svm                      7.28 seconds
+
+Total                             15.12 seconds
+
+📁 SAVED ARTIFACTS
+----------------------------------------------------------------------------------------------------
+  • best_model           C:\Projects\Predictive Maintenance\ml_models\models\anomaly\motor_siemens_1la7_001\one_class_svm.pkl
+  • all_models           C:\Projects\Predictive Maintenance\ml_models\models\anomaly\motor_siemens_1la7_001\all_detectors.pkl
+  • features             C:\Projects\Predictive Maintenance\ml_models\models\anomaly\motor_siemens_1la7_001\features.json
+  • preprocessing        C:\Projects\Predictive Maintenance\ml_models\models\anomaly\motor_siemens_1la7_001\preprocessing.pkl
+  • total_size_mb        17.70231819152832
+
+  Total Size: 17.70 MB
+
+====================================================================================================
+END OF REPORT
+====================================================================================================

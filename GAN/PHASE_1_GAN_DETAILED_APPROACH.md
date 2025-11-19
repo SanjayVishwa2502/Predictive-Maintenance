@@ -947,13 +947,40 @@ project/
 
 ## PHASE 1.5: Adding New Machines to System
 **Duration:** ~2-3 hours per new machine  
-**Goal:** Streamlined workflow to add new machine profiles and generate synthetic data
+**Goal:** Streamlined workflow to add new machine profiles and generate synthetic data  
+**Status:** ⚠️ **BLOCKED** - Requires RUL label generation (see below)
+
+### ⚠️ CRITICAL UPDATE (November 18, 2025)
+
+**BLOCKER IDENTIFIED:** Phase 1.5 cannot be completed until RUL (Remaining Useful Life) labels are added to the workflow.
+
+**Current Issue:**
+- Existing 21 machines have NO RUL labels in synthetic data
+- Phase 1.5 workflow needs RUL as standard feature for all new machines
+- Cannot create new machine template without RUL specification
+
+**Required Work (Assigned to Colleague):**
+1. ✅ Add RUL generation to existing 21 machines (Task 1)
+2. ✅ Create automated new machine workflow with RUL included (Task 2)
+3. ✅ Test end-to-end with 1 test machine
+
+**See Documentation:**
+- **Main Guide:** `COLLEAGUE_HANDOFF_RUL_AND_PHASE_1.5.md` (complete implementation)
+- **Quick Start:** `QUICK_START_COLLEAGUE.md`
+- **Checklist:** `HANDOFF_CHECKLIST.md`
+- **Status:** `PHASE_STATUS_AND_BLOCKERS.md`
+
+**Timeline:** ~1 week to unblock Phase 1.5
+
+---
 
 ### Overview
 Phase 1.5 is the **bridge between Phase 1 and Phase 2** - it enables scaling the system to new machines without starting from scratch. This workflow is executed whenever:
 - Client requests predictive maintenance for a new machine type
 - Expanding coverage to additional equipment
 - Adding machines not in the original 21-machine dataset
+
+**IMPORTANT:** After colleague completes RUL work, Phase 1.5 will be fully automated via `scripts/add_new_machine.py` (5-minute workflow instead of 2-3 hours)
 
 ---
 

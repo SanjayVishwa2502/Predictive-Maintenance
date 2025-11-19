@@ -49,19 +49,16 @@ AUTOGLUON_CONFIG = {
         'eval_metric': 'r2',                    # R² score (coefficient of determination)
         'problem_type': 'regression',           # Continuous value prediction
         'time_limit': 3600,                     # 1 hour per training run
-        'presets': 'best_quality',              # Best quality preset
-        'num_bag_folds': 5,                     # 5-fold bagging
-        'num_stack_levels': 1,                  # 1-level stacking
+        'presets': 'medium_quality_faster_train', # FASTER preset for Pi compatibility (not best_quality)
+        'num_bag_folds': 3,                     # 3-fold bagging (reduced from 5 for speed/size)
+        'num_stack_levels': 0,                  # NO STACKING (lighter models for Pi)
         'verbosity': 2,                         # Standard logging
-        'excluded_model_types': [],             # Try all regression models
-        'hyperparameters': {                    # GPU only for neural networks
-            'NN_TORCH': {'num_gpus': 1},       # Neural networks use GPU
-            'FASTAI': {'num_gpus': 1},         # FastAI uses GPU
-            'GBM': {'num_gpus': 0},            # LightGBM uses CPU only
-            'CAT': {'num_gpus': 0},            # CatBoost uses CPU only
-            'XGB': {'num_gpus': 0},            # XGBoost uses CPU only
-            'RF': {},                           # RandomForest CPU only
-            'XT': {}                            # ExtraTrees CPU only
+        'excluded_model_types': ['NN_TORCH', 'FASTAI', 'XT', 'KNN'],  # Pi-incompatible models EXCLUDED
+        'hyperparameters': {                    # Only Pi-compatible models
+            'GBM': {'num_gpus': 0},            # LightGBM uses CPU only ✅ Pi-compatible
+            'CAT': {'num_gpus': 0},            # CatBoost uses CPU only ✅ Pi-compatible  
+            'XGB': {'num_gpus': 0},            # XGBoost uses CPU only ✅ Pi-compatible
+            'RF': {},                           # RandomForest CPU only ✅ Pi-compatible
         },
         'num_cpus': 6,                          # Low CPU usage (6 cores)
         'num_gpus': 0,                          # Don't pass to fit() - set per model
