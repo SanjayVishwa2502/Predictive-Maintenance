@@ -122,7 +122,7 @@ EDGE_OPTIMIZATION_CONFIG = {
 }
 
 # ==============================================================================
-# MACHINE LIST (All 21 Machines from Phase 1)
+# MACHINE LIST (All 27 Machines - Updated November 21, 2025)
 # ==============================================================================
 
 MACHINES = [
@@ -144,9 +144,15 @@ MACHINES = [
     'compressor_ingersoll_rand_2545_009',
     'compressor_atlas_copco_ga30_001',
     
-    # CNC Machines (2)
+    # CNC Machines (8) - EXPANDED with new temporal machines
     'cnc_dmg_mori_nlx_010',
+    'cnc_dmg_mori_ntx_001',          # NEW
+    'cnc_fanuc_robodrill_001',       # NEW (added Nov 21, 2025)
     'cnc_haas_vf2_001',
+    'cnc_haas_vf3_001',              # NEW
+    'cnc_makino_a51nx_001',          # NEW
+    'cnc_mazak_variaxis_001',        # NEW
+    'cnc_okuma_lb3000_001',          # NEW
     
     # Hydraulic Systems (2)
     'hydraulic_beckwood_press_011',
@@ -166,7 +172,7 @@ MACHINES = [
     'turbofan_cfm56_7b_001'
 ]
 
-# Total: 21 machines
+# Total: 27 machines (updated from 21)
 
 # ==============================================================================
 # MACHINE CATEGORIES (For grouping and analysis)
@@ -177,7 +183,16 @@ MACHINE_CATEGORIES = {
     'pump': ['pump_grundfos_cr3_004', 'pump_flowserve_ansi_005', 'pump_ksb_etanorm_006'],
     'fan': ['fan_ebm_papst_a3g710_007', 'fan_howden_buffalo_008'],
     'compressor': ['compressor_ingersoll_rand_2545_009', 'compressor_atlas_copco_ga30_001'],
-    'cnc': ['cnc_dmg_mori_nlx_010', 'cnc_haas_vf2_001'],
+    'cnc': [
+        'cnc_dmg_mori_nlx_010', 
+        'cnc_dmg_mori_ntx_001',
+        'cnc_fanuc_robodrill_001',      # NEW (added Nov 21, 2025)
+        'cnc_haas_vf2_001',
+        'cnc_haas_vf3_001',
+        'cnc_makino_a51nx_001',
+        'cnc_mazak_variaxis_001',
+        'cnc_okuma_lb3000_001'
+    ],
     'hydraulic': ['hydraulic_beckwood_press_011', 'hydraulic_parker_hpu_012'],
     'conveyor': ['conveyor_dorner_2200_013', 'conveyor_hytrol_e24ez_014'],
     'robot': ['robot_fanuc_m20ia_015', 'robot_abb_irb6700_016'],
@@ -211,37 +226,54 @@ PRIORITY_MACHINES = [
 TRAINING_ESTIMATES = {
     'classification': {
         'time_per_machine': 3600,               # 1 hour per machine
-        'total_time_sequential': 21 * 3600,     # 21 hours (all machines sequential)
+        'total_time_sequential': 27 * 3600,     # 27 hours (all 27 machines sequential)
         'total_time_parallel': 3600,            # 1 hour (if parallelized across machines)
-        'cpu_cores': 20,                        # Cores per training job
+        'cpu_cores': 6,                         # 6 cores per training job (temperature controlled)
         'memory_gb': 8,                         # Memory per training job
-        'disk_space_gb': 0.5                    # ~500 MB per model
+        'disk_space_gb': 0.5,                   # ~500 MB per model
+        'n_machines': 27,                       # Total machines
+        'total_samples_per_machine': 50000,     # 50K temporal samples per machine
+        'avg_features_per_machine': 7.3         # Average 7.3 sensors per machine
     },
     'regression': {
-        'time_per_machine': 3600,               # 1 hour per machine
-        'total_time_sequential': 21 * 3600,     # 21 hours
+        'time_per_machine': 3600,               # 1 hour per machine  
+        'total_time_sequential': 27 * 3600,     # 27 hours (updated from 21)
         'total_time_parallel': 3600,            # 1 hour (parallelized)
-        'cpu_cores': 20,
+        'cpu_cores': 6,                         # 6 cores (reduced from 20)
         'memory_gb': 8,
-        'disk_space_gb': 0.5
+        'disk_space_gb': 0.5,
+        'n_machines': 27,
+        'total_samples_per_machine': 50000,
+        'avg_features_per_machine': 7.3
     },
     'anomaly': {
         'time_per_machine': 600,                # 10 minutes (faster, unsupervised)
-        'total_time_sequential': 21 * 600,      # 3.5 hours
+        'total_time_sequential': 27 * 600,      # 4.5 hours (updated from 3.5)
         'total_time_parallel': 600,             # 10 minutes (parallelized)
-        'cpu_cores': 20,
+        'cpu_cores': 6,                         # 6 cores
         'memory_gb': 4,
-        'disk_space_gb': 0.1
+        'disk_space_gb': 0.1,
+        'n_machines': 27,
+        'total_samples_per_machine': 50000,
+        'avg_features_per_machine': 7.3
     },
     'timeseries': {
         'time_per_machine': 3600,               # 1 hour per machine
-        'total_time_sequential': 21 * 3600,     # 21 hours
+        'total_time_sequential': 27 * 3600,     # 27 hours (updated from 21)
         'total_time_parallel': 3600,            # 1 hour (parallelized)
-        'cpu_cores': 20,
+        'cpu_cores': 6,                         # 6 cores  
         'memory_gb': 10,
-        'disk_space_gb': 1.0
+        'disk_space_gb': 1.0,
+        'n_machines': 27,
+        'total_samples_per_machine': 50000,
+        'avg_features_per_machine': 7.3
     }
 }
+
+# TOTAL TRAINING TIME ESTIMATES:
+# - Sequential (all 4 model types): 27 + 27 + 4.5 + 27 = 85.5 hours
+# - Parallel (4 model types simultaneously): max(27, 27, 4.5, 27) = 27 hours
+# - Per-machine (all 4 types): 1 + 1 + 0.17 + 1 = 3.17 hours per machine
 
 # ==============================================================================
 # MLFLOW EXPERIMENT TRACKING CONFIGURATION
@@ -368,7 +400,7 @@ def estimate_training_time(model_types: list, parallel: bool = False):
 
 def validate_config():
     """Validate configuration consistency"""
-    assert len(MACHINES) == 21, f"Expected 21 machines, found {len(MACHINES)}"
+    assert len(MACHINES) == 27, f"Expected 27 machines, found {len(MACHINES)}"
     assert len(MODEL_TYPES) == 4, f"Expected 4 model types, found {len(MODEL_TYPES)}"
     
     # Check all machines have categories
@@ -377,10 +409,15 @@ def validate_config():
         all_categorized.extend(machines)
     assert set(all_categorized) == set(MACHINES), "Machine category mismatch"
     
+    # Check new machine is included
+    assert 'cnc_fanuc_robodrill_001' in MACHINES, "New machine not found in list"
+    assert 'cnc_fanuc_robodrill_001' in MACHINE_CATEGORIES['cnc'], "New machine not categorized"
+    
     print("✅ Configuration validation passed")
-    print(f"✅ {len(MACHINES)} machines configured")
+    print(f"✅ {len(MACHINES)} machines configured (updated from 21 to 27)")
     print(f"✅ {len(MODEL_TYPES)} model types defined")
     print(f"✅ {len(MACHINE_CATEGORIES)} categories defined")
+    print(f"✅ New machine 'cnc_fanuc_robodrill_001' verified")
 
 if __name__ == "__main__":
     # Validate configuration when run directly

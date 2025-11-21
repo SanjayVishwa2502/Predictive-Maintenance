@@ -52,58 +52,15 @@ def train_regression_fast(machine_id, time_limit=900):
         test_df = pd.read_parquet(data_path / 'test.parquet')
         print("  ✓ Data loaded")
         
-        # Step 2: Create RUL labels
-        print("  Creating RUL (Remaining Useful Life) labels...")
+        # Step 2: Verify RUL column exists
+        target_col = 'rul'
+        if target_col not in train_df.columns:
+            raise ValueError(f"RUL column '{target_col}' not found in data! Available columns: {list(train_df.columns)}")
         
-        def calculate_rul(df):
-            """
-            Calculate RUL using time-based degradation simulation
-            Creates realistic RUL that decreases over time with some variance
-            """
-            n_samples = len(df)
-            
-            # Create time index (0 to 1) - simulate equipment lifecycle
-            time_index = np.linspace(0, 1, n_samples)
-            
-            # Base RUL: starts at max, decreases to 0
-            max_rul = 1000  # hours
-            base_rul = max_rul * (1 - time_index)
-            
-            # Add sensor-based adjustments (small influence)
-            temp_cols = [c for c in df.columns if 'temp' in c.lower()]
-            vib_cols = [c for c in df.columns if 'vib' in c.lower() or 'velocity' in c.lower()]
-            
-            sensor_factor = 0
-            if temp_cols:
-                # Higher temps = faster degradation = lower RUL
-                temp_norm = (df[temp_cols].mean(axis=1) - df[temp_cols].mean(axis=1).min()) / (df[temp_cols].mean(axis=1).max() - df[temp_cols].mean(axis=1).min() + 1e-6)
-                sensor_factor += temp_norm * 0.1  # 10% influence
-            
-            if vib_cols:
-                # Higher vibration = faster degradation = lower RUL
-                vib_norm = (df[vib_cols].mean(axis=1) - df[vib_cols].mean(axis=1).min()) / (df[vib_cols].mean(axis=1).max() - df[vib_cols].mean(axis=1).min() + 1e-6)
-                sensor_factor += vib_norm * 0.1  # 10% influence
-            
-            # Adjust RUL based on sensor readings
-            rul = base_rul * (1 - sensor_factor)
-            
-            # Add realistic noise (±10%)
-            noise = np.random.normal(0, max_rul * 0.1, n_samples)
-            rul = rul + noise
-            
-            # Clip to valid range
-            rul = np.clip(rul, 0, max_rul)
-            
-            return rul
-        
-        train_df['rul'] = calculate_rul(train_df)
-        val_df['rul'] = calculate_rul(val_df)
-        test_df['rul'] = calculate_rul(test_df)
-        print("  ✓ RUL labels created")
+        print(f"  ✓ RUL column verified in data")
         
         # Combine train + val
         train_data = pd.concat([train_df, val_df], ignore_index=True)
-        target_col = 'rul'
         
         print(f"Train samples: {len(train_data):,}")
         print(f"Test samples: {len(test_df):,}")
