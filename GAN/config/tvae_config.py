@@ -11,7 +11,7 @@ Based on Phase 1.1.3 comparison results
 TVAE_CONFIG = {
     # Training parameters
     'epochs': 500,  # High-confidence training (optimized for max quality)
-    'batch_size': 500,  # Increased from 100 for production
+    'batch_size': 100,  # Set to 100 as requested
     'cuda': True,  # GPU acceleration enabled
     'verbose': True,  # Show training progress
     

@@ -1399,6 +1399,28 @@ Total: ~2.08 hours for new machine with comprehensive anomaly detection
 **Duration:** Week 5  
 **Goal:** Train ONE generic time-series forecasting model
 
+**⚠️ STATUS: BLOCKED - Waiting on Phase 1.6 (Temporal Data Generation)**
+
+**Blocker Details:**
+- **Issue:** Current GAN data lacks temporal ordering (no timestamps, random samples)
+- **Impact:** Cannot train time-series models without sequential data
+- **Required:** Phase 1.6 implementation by GAN team (see `instructions/` folder)
+- **Timeline:** 1-2 days for GAN team to add timestamps + sequential RUL
+- **Action:** Complete handoff package delivered in `instructions/` folder
+- **Next Step:** Wait for GAN team to regenerate all 21 machines with temporal data
+
+**What's Needed from Phase 1.6:**
+- ✅ Timestamp column in all parquet files
+- ✅ RUL decreasing sequentially (500→0 over time)
+- ✅ Sensors correlated with RUL degradation
+- ✅ Chronological train/val/test split (not random)
+
+**Once Phase 1.6 Complete:**
+- Resume Phase 2.5 training (estimated <1 hour for all machines)
+- Expected MAPE: 5-15% (realistic, not fake 2.58%)
+
+---
+
 ### Phase 2.5.1: Time-Series Pipeline Setup (Days 1-3)
 
 **Approach:** Generic LSTM/Transformer for all machines
