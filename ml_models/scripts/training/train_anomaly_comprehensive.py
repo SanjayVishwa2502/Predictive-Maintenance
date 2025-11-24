@@ -38,17 +38,17 @@ from sklearn.metrics import (
     precision_recall_curve, roc_curve, average_precision_score
 )
 
-# Deep Learning
-try:
-    from tensorflow import keras
-    from tensorflow.keras import layers, models
-    KERAS_AVAILABLE = True
-except ImportError:
-    KERAS_AVAILABLE = False
-    print("⚠️ TensorFlow not available - Autoencoder will be skipped")
+# Deep Learning - DISABLED to avoid dependency issues
+KERAS_AVAILABLE = False
+print("ℹ️  TensorFlow/Keras disabled - Using statistical and ML models only")
 
 # MLflow
-import mlflow
+try:
+    import mlflow
+    MLFLOW_AVAILABLE = True
+except ImportError:
+    MLFLOW_AVAILABLE = False
+    mlflow = None
 
 # Custom imports
 sys.path.append(str(Path(__file__).parent.parent.parent))
@@ -304,9 +304,11 @@ def train_comprehensive_anomaly_detection(machine_id, config):
     print(f"{'#' * 80}\n")
     
     # MLflow experiment
-    mlflow.set_experiment(f"ML_Anomaly_Comprehensive_{machine_id}")
+    if MLFLOW_AVAILABLE:
+        mlflow.set_experiment(f"ML_Anomaly_Comprehensive_{machine_id}")
+        run = mlflow.start_run(run_name=f"{machine_id}_comprehensive_anomaly")
     
-    with mlflow.start_run(run_name=f"{machine_id}_comprehensive_anomaly"):
+    try:
         overall_start = time.time()
         
         # =====================================================================
@@ -524,9 +526,10 @@ def train_comprehensive_anomaly_detection(machine_id, config):
                 all_results[detector_name] = metrics
                 
                 # Log to MLflow
-                for metric_name, value in metrics.items():
-                    if isinstance(value, (int, float)):
-                        mlflow.log_metric(f'{detector_name}_{metric_name}', value)
+                if MLFLOW_AVAILABLE:
+                    for metric_name, value in metrics.items():
+                        if isinstance(value, (int, float)):
+                            mlflow.log_metric(f'{detector_name}_{metric_name}', value)
             
             # =====================================================================
             # STEP 4: SELECT BEST MODEL
@@ -677,10 +680,11 @@ def train_comprehensive_anomaly_detection(machine_id, config):
         print(f"  ✅ Report saved: {report_path}")
         
         # MLflow logging
-        mlflow.log_param('best_model', best_model_name)
-        mlflow.log_metric('total_training_time_minutes', total_time / 60)
-        mlflow.log_metric('model_size_mb', model_size_mb)
-        mlflow.log_metric('n_detectors_trained', len(detectors))
+        if MLFLOW_AVAILABLE:
+            mlflow.log_param('best_model', best_model_name)
+            mlflow.log_metric('total_training_time_minutes', total_time / 60)
+            mlflow.log_metric('model_size_mb', model_size_mb)
+            mlflow.log_metric('n_detectors_trained', len(detectors))
         
         # =====================================================================
         # COMPLETION SUMMARY
@@ -697,6 +701,11 @@ def train_comprehensive_anomaly_detection(machine_id, config):
         print(f"\n" + "#" * 80 + "\n")
         
         return report
+    
+    finally:
+        # Close MLflow run
+        if MLFLOW_AVAILABLE:
+            mlflow.end_run()
 
 
 if __name__ == "__main__":
