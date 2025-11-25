@@ -1,0 +1,35 @@
+
+Machine ID: conveyor_dorner_2200_013
+Type: Conveyor Belt System
+Manufacturer: DORNER
+Model: 2200
+
+SPECIFICATIONS:
+- Sensors Monitored: 4
+- Data Collection: Real-time, 1-hour intervals
+- Operational Status: Active monitoring
+
+SENSORS (4):
+- motor_temp_C
+- gearbox_temp_C
+- motor_vibration_mm_s
+- motor_current_a  # Show first 15 sensors
+
+
+COMMON FAILURE MODES:
+- Belt wear
+- Motor failure
+- Bearing seizure
+- Misalignment
+
+MAINTENANCE PROCEDURES:
+- Check belt tension weekly
+- Lubricate bearings monthly
+- Inspect rollers quarterly
+- Clean system monthly
+
+SAFETY NOTES:
+- Always follow lockout/tagout procedures
+- Check for abnormal vibrations before operation
+- Monitor temperature readings regularly
+- Report unusual noises or performance degradation immediately

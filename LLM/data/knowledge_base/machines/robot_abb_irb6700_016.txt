@@ -1,0 +1,36 @@
+
+Machine ID: robot_abb_irb6700_016
+Type: Industrial Robot
+Manufacturer: ABB
+Model: IRB6700
+
+SPECIFICATIONS:
+- Sensors Monitored: 5
+- Data Collection: Real-time, 1-hour intervals
+- Operational Status: Active monitoring
+
+SENSORS (5):
+- J1_motor_temp_C
+- J2_motor_temp_C
+- base_vibration_mm_s
+- cycle_time_seconds
+- position_error_mm  # Show first 15 sensors
+
+
+COMMON FAILURE MODES:
+- Joint motor failure
+- Encoder malfunction
+- Cable wear
+- Gripper issues
+
+MAINTENANCE PROCEDURES:
+- Check encoder signals monthly
+- Lubricate joints quarterly
+- Inspect cables weekly
+- Calibrate annually
+
+SAFETY NOTES:
+- Always follow lockout/tagout procedures
+- Check for abnormal vibrations before operation
+- Monitor temperature readings regularly
+- Report unusual noises or performance degradation immediately

@@ -1,0 +1,43 @@
+
+Machine ID: cnc_makino_a51nx_001
+Type: CNC Machine
+Manufacturer: MAKINO
+Model: A51NX
+
+SPECIFICATIONS:
+- Sensors Monitored: 12
+- Data Collection: Real-time, 1-hour intervals
+- Operational Status: Active monitoring
+
+SENSORS (12):
+- timestamp
+- spindle_bearing_temp
+- motor_temp
+- ambient_temp
+- process_temp
+- temp_difference
+- spindle_speed
+- cutting_force
+- spindle_torque
+- feed_rate
+- vibration
+- power_consumption  # Show first 15 sensors
+
+
+COMMON FAILURE MODES:
+- Spindle bearing wear
+- Tool changer malfunction
+- Coolant pump failure
+- Servo motor issues
+
+MAINTENANCE PROCEDURES:
+- Check tool alignment weekly
+- Lubricate ways daily
+- Inspect spindle bearings monthly
+- Clean coolant system weekly
+
+SAFETY NOTES:
+- Always follow lockout/tagout procedures
+- Check for abnormal vibrations before operation
+- Monitor temperature readings regularly
+- Report unusual noises or performance degradation immediately

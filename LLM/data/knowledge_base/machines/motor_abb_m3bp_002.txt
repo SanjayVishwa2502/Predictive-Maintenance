@@ -1,0 +1,41 @@
+
+Machine ID: motor_abb_m3bp_002
+Type: Electric Motor
+Manufacturer: ABB
+Model: M3BP
+
+SPECIFICATIONS:
+- Sensors Monitored: 10
+- Data Collection: Real-time, 1-hour intervals
+- Operational Status: Active monitoring
+
+SENSORS (10):
+- bearing_de_temp_C
+- bearing_nde_temp_C
+- winding_temp_C
+- frame_temp_C
+- overall_rms_mm_s
+- axial_mm_s
+- current_a
+- power_factor
+- current_imbalance_percent
+- sound_pressure_level_dBA  # Show first 15 sensors
+
+
+COMMON FAILURE MODES:
+- Bearing wear
+- Winding insulation failure
+- Overheating
+- Shaft misalignment
+
+MAINTENANCE PROCEDURES:
+- Lubricate bearings every 3 months
+- Inspect windings annually
+- Check vibration monthly
+- Clean cooling vents quarterly
+
+SAFETY NOTES:
+- Always follow lockout/tagout procedures
+- Check for abnormal vibrations before operation
+- Monitor temperature readings regularly
+- Report unusual noises or performance degradation immediately

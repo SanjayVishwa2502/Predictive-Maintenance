@@ -1,0 +1,40 @@
+
+Machine ID: cnc_fanuc_robodrill_001
+Type: CNC Machine
+Manufacturer: FANUC
+Model: ROBODRILL
+
+SPECIFICATIONS:
+- Sensors Monitored: 9
+- Data Collection: Real-time, 1-hour intervals
+- Operational Status: Active monitoring
+
+SENSORS (9):
+- spindle_bearing_temp_C
+- motor_temp_C
+- ambient_temp_K
+- process_temp_K
+- temp_difference_K
+- spindle_speed_rpm
+- spindle_vibration_mm_s
+- spindle_torque_nm
+- power_consumption_kW  # Show first 15 sensors
+
+
+COMMON FAILURE MODES:
+- Spindle bearing wear
+- Tool changer malfunction
+- Coolant pump failure
+- Servo motor issues
+
+MAINTENANCE PROCEDURES:
+- Check tool alignment weekly
+- Lubricate ways daily
+- Inspect spindle bearings monthly
+- Clean coolant system weekly
+
+SAFETY NOTES:
+- Always follow lockout/tagout procedures
+- Check for abnormal vibrations before operation
+- Monitor temperature readings regularly
+- Report unusual noises or performance degradation immediately

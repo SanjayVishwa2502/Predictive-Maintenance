@@ -11,3 +11,8 @@ __pycache__/
 .ipynb_checkpoints/
 mlruns/
 wandb/
+
+# LLM Models (large files)
+LLM/models/*.gguf
+LLM/data/embeddings/*.index
+LLM/scripts/setup/*.whl

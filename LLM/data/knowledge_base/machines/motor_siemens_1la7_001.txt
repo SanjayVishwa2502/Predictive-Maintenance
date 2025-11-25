@@ -1,0 +1,46 @@
+
+Machine ID: motor_siemens_1la7_001
+Type: Electric Motor
+Manufacturer: SIEMENS
+Model: 1LA7
+
+SPECIFICATIONS:
+- Sensors Monitored: 22
+- Data Collection: Real-time, 1-hour intervals
+- Operational Status: Active monitoring
+
+SENSORS (22):
+- bearing_de_temp_C
+- bearing_nde_temp_C
+- winding_temp_C
+- casing_temp_C
+- ambient_temp_C
+- rms_velocity_mm_s
+- peak_velocity_mm_s
+- bpfo_frequency_hz
+- bpfi_frequency_hz
+- current_25pct_load_A
+- current_50pct_load_A
+- current_75pct_load_A
+- current_100pct_load_A
+- current_no_load_A
+- voltage_phase_to_phase_V  # Show first 15 sensors
+... and 7 more sensors
+
+COMMON FAILURE MODES:
+- Bearing wear
+- Winding insulation failure
+- Overheating
+- Shaft misalignment
+
+MAINTENANCE PROCEDURES:
+- Lubricate bearings every 3 months
+- Inspect windings annually
+- Check vibration monthly
+- Clean cooling vents quarterly
+
+SAFETY NOTES:
+- Always follow lockout/tagout procedures
+- Check for abnormal vibrations before operation
+- Monitor temperature readings regularly
+- Report unusual noises or performance degradation immediately

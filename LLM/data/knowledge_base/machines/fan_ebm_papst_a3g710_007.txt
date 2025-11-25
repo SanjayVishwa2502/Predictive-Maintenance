@@ -1,0 +1,37 @@
+
+Machine ID: fan_ebm_papst_a3g710_007
+Type: Industrial Fan
+Manufacturer: EBM
+Model: PAPST
+
+SPECIFICATIONS:
+- Sensors Monitored: 6
+- Data Collection: Real-time, 1-hour intervals
+- Operational Status: Active monitoring
+
+SENSORS (6):
+- motor_temp_C
+- bearing_temp_C
+- overall_rms_mm_s
+- current_a
+- power_kW
+- sound_pressure_level_dBA  # Show first 15 sensors
+
+
+COMMON FAILURE MODES:
+- Blade wear
+- Bearing failure
+- Motor overheating
+- Vibration issues
+
+MAINTENANCE PROCEDURES:
+- Balance blades quarterly
+- Lubricate bearings monthly
+- Check motor temperature weekly
+- Clean blades monthly
+
+SAFETY NOTES:
+- Always follow lockout/tagout procedures
+- Check for abnormal vibrations before operation
+- Monitor temperature readings regularly
+- Report unusual noises or performance degradation immediately

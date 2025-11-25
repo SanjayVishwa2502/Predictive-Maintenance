@@ -1,0 +1,34 @@
+
+Machine ID: hydraulic_parker_hpu_012
+Type: Hydraulic System
+Manufacturer: PARKER
+Model: HPU
+
+SPECIFICATIONS:
+- Sensors Monitored: 3
+- Data Collection: Real-time, 1-hour intervals
+- Operational Status: Active monitoring
+
+SENSORS (3):
+- oil_temp_C
+- pump_temp_C
+- pump_vibration_mm_s  # Show first 15 sensors
+
+
+COMMON FAILURE MODES:
+- Fluid leakage
+- Pump wear
+- Valve malfunction
+- Contamination
+
+MAINTENANCE PROCEDURES:
+- Change hydraulic fluid annually
+- Replace filters quarterly
+- Check hoses monthly
+- Inspect seals every 6 months
+
+SAFETY NOTES:
+- Always follow lockout/tagout procedures
+- Check for abnormal vibrations before operation
+- Monitor temperature readings regularly
+- Report unusual noises or performance degradation immediately

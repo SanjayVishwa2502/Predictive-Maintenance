@@ -1,0 +1,36 @@
+
+Machine ID: hydraulic_beckwood_press_011
+Type: Hydraulic System
+Manufacturer: BECKWOOD
+Model: PRESS
+
+SPECIFICATIONS:
+- Sensors Monitored: 5
+- Data Collection: Real-time, 1-hour intervals
+- Operational Status: Active monitoring
+
+SENSORS (5):
+- oil_temp_C
+- pump_case_temp_C
+- pump_vibration_mm_s
+- cycle_time_seconds
+- force_accuracy_percent  # Show first 15 sensors
+
+
+COMMON FAILURE MODES:
+- Fluid leakage
+- Pump wear
+- Valve malfunction
+- Contamination
+
+MAINTENANCE PROCEDURES:
+- Change hydraulic fluid annually
+- Replace filters quarterly
+- Check hoses monthly
+- Inspect seals every 6 months
+
+SAFETY NOTES:
+- Always follow lockout/tagout procedures
+- Check for abnormal vibrations before operation
+- Monitor temperature readings regularly
+- Report unusual noises or performance degradation immediately

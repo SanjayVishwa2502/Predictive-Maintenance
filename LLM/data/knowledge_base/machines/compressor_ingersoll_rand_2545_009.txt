@@ -1,0 +1,36 @@
+
+Machine ID: compressor_ingersoll_rand_2545_009
+Type: Air Compressor
+Manufacturer: INGERSOLL
+Model: RAND
+
+SPECIFICATIONS:
+- Sensors Monitored: 5
+- Data Collection: Real-time, 1-hour intervals
+- Operational Status: Active monitoring
+
+SENSORS (5):
+- cylinder_head_1st_stage_C
+- cylinder_head_2nd_stage_C
+- oil_temp_C
+- overall_rms_mm_s
+- motor_current_a  # Show first 15 sensors
+
+
+COMMON FAILURE MODES:
+- Oil contamination
+- Valve failure
+- Bearing wear
+- Overheating
+
+MAINTENANCE PROCEDURES:
+- Change oil every 2000 hours
+- Replace filters monthly
+- Check pressure relief valve quarterly
+- Inspect bearings every 6 months
+
+SAFETY NOTES:
+- Always follow lockout/tagout procedures
+- Check for abnormal vibrations before operation
+- Monitor temperature readings regularly
+- Report unusual noises or performance degradation immediately

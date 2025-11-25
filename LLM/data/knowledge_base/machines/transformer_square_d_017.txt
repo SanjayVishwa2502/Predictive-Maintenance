@@ -1,0 +1,35 @@
+
+Machine ID: transformer_square_d_017
+Type: Power Transformer
+Manufacturer: SQUARE
+Model: D
+
+SPECIFICATIONS:
+- Sensors Monitored: 4
+- Data Collection: Real-time, 1-hour intervals
+- Operational Status: Active monitoring
+
+SENSORS (4):
+- primary_current_a
+- secondary_current_a
+- load_percent
+- sound_level_dba  # Show first 15 sensors
+
+
+COMMON FAILURE MODES:
+- Insulation breakdown
+- Overheating
+- Oil contamination
+- Winding failure
+
+MAINTENANCE PROCEDURES:
+- Test oil annually
+- Monitor temperature daily
+- Inspect bushings quarterly
+- Check grounding monthly
+
+SAFETY NOTES:
+- Always follow lockout/tagout procedures
+- Check for abnormal vibrations before operation
+- Monitor temperature readings regularly
+- Report unusual noises or performance degradation immediately

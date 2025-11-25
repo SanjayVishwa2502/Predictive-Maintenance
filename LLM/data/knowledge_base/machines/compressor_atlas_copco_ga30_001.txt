@@ -1,0 +1,41 @@
+
+Machine ID: compressor_atlas_copco_ga30_001
+Type: Air Compressor
+Manufacturer: ATLAS
+Model: COPCO
+
+SPECIFICATIONS:
+- Sensors Monitored: 10
+- Data Collection: Real-time, 1-hour intervals
+- Operational Status: Active monitoring
+
+SENSORS (10):
+- discharge_air_temp_C
+- oil_temp_C
+- motor_winding_temp_C
+- ambient_temp_C
+- rms_velocity_mm_s
+- current_A
+- power_factor
+- discharge_pressure_bar
+- suction_pressure_bar
+- air_flow_cfm  # Show first 15 sensors
+
+
+COMMON FAILURE MODES:
+- Oil contamination
+- Valve failure
+- Bearing wear
+- Overheating
+
+MAINTENANCE PROCEDURES:
+- Change oil every 2000 hours
+- Replace filters monthly
+- Check pressure relief valve quarterly
+- Inspect bearings every 6 months
+
+SAFETY NOTES:
+- Always follow lockout/tagout procedures
+- Check for abnormal vibrations before operation
+- Monitor temperature readings regularly
+- Report unusual noises or performance degradation immediately

@@ -1,0 +1,39 @@
+
+Machine ID: robot_fanuc_m20ia_015
+Type: Industrial Fan
+Manufacturer: FANUC
+Model: M20IA
+
+SPECIFICATIONS:
+- Sensors Monitored: 8
+- Data Collection: Real-time, 1-hour intervals
+- Operational Status: Active monitoring
+
+SENSORS (8):
+- J1_motor_temp_C
+- J2_motor_temp_C
+- J3_motor_temp_C
+- base_vibration_mm_s
+- total_current_a
+- power_kW
+- cycle_time_seconds
+- position_error_mm  # Show first 15 sensors
+
+
+COMMON FAILURE MODES:
+- Blade wear
+- Bearing failure
+- Motor overheating
+- Vibration issues
+
+MAINTENANCE PROCEDURES:
+- Balance blades quarterly
+- Lubricate bearings monthly
+- Check motor temperature weekly
+- Clean blades monthly
+
+SAFETY NOTES:
+- Always follow lockout/tagout procedures
+- Check for abnormal vibrations before operation
+- Monitor temperature readings regularly
+- Report unusual noises or performance degradation immediately
