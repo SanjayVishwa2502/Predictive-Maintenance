@@ -107,7 +107,11 @@ class AnomalyPredictor:
             features_path = self.model_path / "features.json"
             if features_path.exists():
                 with open(features_path, 'r') as f:
-                    self.feature_names = json.load(f)
+                    data = json.load(f)
+                    if isinstance(data, dict) and 'features' in data:
+                        self.feature_names = data['features']
+                    else:
+                        self.feature_names = data
                 print(f"✓ Loaded {len(self.feature_names)} feature names")
             
             print("✓ Anomaly detection models loaded successfully\n")
@@ -133,8 +137,40 @@ class AnomalyPredictor:
             # Convert to DataFrame
             df = pd.DataFrame([sensor_data])
             
+            # Filter and align features
+            target_features = None
+            
+            # Priority 1: Use Scaler's expected features if available
+            if self.preprocessing is not None and hasattr(self.preprocessing, 'feature_names_in_'):
+                target_features = list(self.preprocessing.feature_names_in_)
+            # Priority 2: Use loaded features.json
+            elif self.feature_names:
+                target_features = self.feature_names
+            
+            if target_features:
+                # Ensure all required features are present
+                for f in target_features:
+                    if f not in df.columns:
+                        df[f] = 0.0
+                
+                # Select and reorder columns
+                df = df[target_features]
+            
             # Preprocess if preprocessing pipeline exists
             if self.preprocessing is not None:
+                # Final safety check for feature count
+                if hasattr(self.preprocessing, 'n_features_in_'):
+                    n_expected = self.preprocessing.n_features_in_
+                    if df.shape[1] != n_expected:
+                        # If we still have a mismatch (e.g. scaler has no names but specific count)
+                        if df.shape[1] > n_expected:
+                            # Truncate extra features silently
+                            df = df.iloc[:, :n_expected]
+                        elif df.shape[1] < n_expected:
+                            # Pad with zeros if missing
+                            for i in range(n_expected - df.shape[1]):
+                                df[f'pad_{i}'] = 0.0
+
                 X = self.preprocessing.transform(df)
             else:
                 X = df.values

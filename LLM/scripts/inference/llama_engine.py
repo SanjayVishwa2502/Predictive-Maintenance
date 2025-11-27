@@ -2,8 +2,25 @@
 Test Llama 3.1 8B inference with llama.cpp (FAST & LIGHTWEIGHT)
 Phase 3.2.2: Basic Inference Testing
 """
-from llama_cpp import Llama
+import os
+import sys
 from pathlib import Path
+
+# Add CUDA DLLs to PATH for llama-cpp-python (if CUDA Toolkit is not installed)
+# This fixes "Could not find module ... llama.dll"
+venv_path = Path(__file__).resolve().parents[3] / "venv" / "Lib" / "site-packages" / "nvidia"
+cuda_runtime_bin = venv_path / "cuda_runtime" / "bin"
+cublas_bin = venv_path / "cublas" / "bin"
+
+if cuda_runtime_bin.exists():
+    os.add_dll_directory(str(cuda_runtime_bin))
+    os.environ["PATH"] = str(cuda_runtime_bin) + ";" + os.environ["PATH"]
+
+if cublas_bin.exists():
+    os.add_dll_directory(str(cublas_bin))
+    os.environ["PATH"] = str(cublas_bin) + ";" + os.environ["PATH"]
+
+from llama_cpp import Llama
 import time
 
 class LlamaInference:
@@ -30,7 +47,7 @@ class LlamaInference:
                 n_gpu_layers=-1,  # Use all GPU layers (-1 = all)
                 n_ctx=2048,       # Context window
                 n_batch=512,      # Batch size
-                verbose=False
+                verbose=True      # Enable verbose logging to check CUDA status
             )
             
             load_time = time.time() - load_start

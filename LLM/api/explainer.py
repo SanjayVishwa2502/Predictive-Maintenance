@@ -17,7 +17,7 @@ sys.path.append(str(project_root / "LLM" / "scripts" / "inference"))
 sys.path.append(str(project_root / "LLM" / "scripts" / "rag"))
 sys.path.append(str(project_root / "LLM" / "config"))
 
-from test_llama import LlamaInference
+from llama_engine import LlamaInference
 from retriever import MachineDocRetriever
 from prompts import (
     SYSTEM_PROMPT,

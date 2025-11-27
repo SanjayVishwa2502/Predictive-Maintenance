@@ -111,16 +111,34 @@ class RAGRetriever:
         
     def load_index(self):
         """Load FAISS index and documents"""
-        # TODO: Implement in Phase 3.5.1
-        # from sentence_transformers import SentenceTransformer
-        # import faiss
-        # self.embedder = SentenceTransformer('all-MiniLM-L6-v2')
-        # self.index = faiss.read_index(str(self.embeddings_dir / 'knowledge_base.index'))
-        # with open(self.embeddings_dir / 'documents.json') as f:
-        #     self.documents = json.load(f)
-        pass
+        try:
+            from sentence_transformers import SentenceTransformer
+            import faiss
+            import pickle
+            
+            print("    Loading SentenceTransformer...")
+            self.embedder = SentenceTransformer('all-MiniLM-L6-v2')
+            
+            index_path = self.embeddings_dir / 'machines.index'
+            metadata_path = self.embeddings_dir / 'metadata.pkl'
+            
+            if index_path.exists() and metadata_path.exists():
+                print(f"    Loading FAISS index from {index_path}...")
+                self.index = faiss.read_index(str(index_path))
+                
+                print(f"    Loading metadata from {metadata_path}...")
+                with open(metadata_path, 'rb') as f:
+                    self.documents = pickle.load(f)
+                print("    ✓ RAG index loaded successfully")
+            else:
+                print(f"    ⚠️ RAG index files not found in {self.embeddings_dir}")
+                
+        except ImportError:
+            print("    ⚠️ sentence-transformers or faiss not installed. RAG disabled.")
+        except Exception as e:
+            print(f"    ⚠️ Error loading RAG index: {e}")
     
-    def retrieve(self, query: str, machine_id: str, top_k: int = 5) -> List[Dict]:
+    def retrieve(self, query: str, machine_id: str, top_k: int = 5) -> List[str]:
         """
         Retrieve relevant documents
         
@@ -130,14 +148,28 @@ class RAGRetriever:
             top_k: Number of documents to retrieve
             
         Returns:
-            List of relevant documents with metadata
+            List of relevant documents (strings)
         """
-        # TODO: Implement in Phase 3.5.1
-        # query_embedding = self.embedder.encode([query])
-        # distances, indices = self.index.search(query_embedding, top_k)
-        # results = [self.documents[i] for i in indices[0]]
-        # return results
-        return []
+        if not self.index or not self.embedder:
+            return []
+            
+        try:
+            query_embedding = self.embedder.encode([query])
+            distances, indices = self.index.search(query_embedding, top_k)
+            
+            results = []
+            for idx in indices[0]:
+                if idx < len(self.documents):
+                    # Assuming documents is a list of dicts or strings
+                    doc = self.documents[idx]
+                    if isinstance(doc, dict):
+                        results.append(doc.get('text', str(doc)))
+                    else:
+                        results.append(str(doc))
+            return results
+        except Exception as e:
+            print(f"Error during retrieval: {e}")
+            return []
 
 
 class PromptFormatter:
@@ -156,9 +188,77 @@ class PromptFormatter:
     
     def _load_templates(self):
         """Load all prompt templates"""
-        # TODO: Implement in Phase 3.5.1
-        # Load templates from templates_dir
-        pass
+        # Default templates
+        self.templates = {
+            'classification': """
+MACHINE: {machine_id}
+ANALYSIS: Classification (Failure Type)
+
+PREDICTION:
+{prediction}
+
+CONTEXT:
+{context}
+
+INSTRUCTIONS:
+Explain the failure type detected. What are the symptoms? What maintenance action is recommended?
+""",
+            'anomaly': """
+MACHINE: {machine_id}
+ANALYSIS: Anomaly Detection
+
+PREDICTION:
+{prediction}
+
+CONTEXT:
+{context}
+
+INSTRUCTIONS:
+Is the machine behavior anomalous? If so, what might be the cause? Recommend inspection steps.
+""",
+            'rul': """
+MACHINE: {machine_id}
+ANALYSIS: Remaining Useful Life (RUL)
+
+PREDICTION:
+{prediction}
+
+CONTEXT:
+{context}
+
+INSTRUCTIONS:
+The estimated RUL is provided. Interpret this for the maintenance team. When should maintenance be scheduled?
+""",
+            'timeseries': """
+MACHINE: {machine_id}
+ANALYSIS: Time Series Forecast
+
+PREDICTION:
+{prediction}
+
+CONTEXT:
+{context}
+
+INSTRUCTIONS:
+Analyze the forecasted trends. Are any parameters trending towards dangerous levels?
+"""
+        }
+        
+        # Add aliases
+        self.templates['timeseries_forecast'] = self.templates['timeseries']
+        self.templates['rul_regression'] = self.templates['rul']
+        self.templates['anomaly_detection'] = self.templates['anomaly']
+        
+        # Try to load from files if they exist
+        if self.templates_dir.exists():
+            for template_file in self.templates_dir.glob("*.txt"):
+                key = template_file.stem
+                try:
+                    with open(template_file, 'r') as f:
+                        self.templates[key] = f.read()
+                except Exception as e:
+                    print(f"Warning: Could not load template {template_file}: {e}")
+
     
     def format_prompt(self, model_type: str, ml_prediction: Dict, 
                      rag_context: List[Dict], machine_id: str) -> str:
@@ -174,14 +274,27 @@ class PromptFormatter:
         Returns:
             Formatted prompt string
         """
-        # TODO: Implement in Phase 3.5.1
-        # template = self.templates[model_type]
-        # return template.format(
-        #     machine_id=machine_id,
-        #     prediction=ml_prediction,
-        #     context=rag_context
-        # )
-        return ""
+        template = self.templates.get(model_type, self.templates.get('classification'))
+        
+        # Format context
+        context_str = "\n".join([f"- {doc}" for doc in rag_context]) if rag_context else "No specific context available."
+        
+        # Prepare prediction data
+        # For timeseries, remove detailed_forecast to save tokens
+        prediction_data = ml_prediction.copy()
+        if (model_type == 'timeseries' or model_type == 'timeseries_forecast') and 'detailed_forecast' in prediction_data:
+            # Keep only summary info
+            del prediction_data['detailed_forecast']
+            prediction_data['note'] = "Detailed forecast data omitted for brevity. See summary and trends."
+            
+        # Format prediction
+        pred_str = json.dumps(prediction_data, indent=2)
+        
+        return template.format(
+            machine_id=machine_id,
+            prediction=pred_str,
+            context=context_str
+        )
 
 
 class LLMGenerator:
@@ -199,15 +312,24 @@ class LLMGenerator:
         
     def load_model(self):
         """Load LLM model"""
-        # TODO: Implement in Phase 3.5.1
-        # from llama_cpp import Llama
-        # self.llm = Llama(
-        #     model_path=str(self.model_path),
-        #     n_ctx=4096,
-        #     n_threads=4,
-        #     n_gpu_layers=0
-        # )
-        pass
+        if not self.model_path.exists():
+            raise FileNotFoundError(f"LLM model not found at {self.model_path}")
+
+        try:
+            from llama_cpp import Llama
+            print(f"    Loading Llama model from {self.model_path}...")
+            self.llm = Llama(
+                model_path=str(self.model_path),
+                n_ctx=4096,
+                n_gpu_layers=-1,  # Offload all layers to GPU
+                verbose=False
+            )
+            print("    ✓ Llama model loaded successfully")
+        except ImportError:
+            print("    ⚠️ llama-cpp-python not installed. LLM generation will fail.")
+        except Exception as e:
+            print(f"    ⚠️ Error loading LLM: {e}")
+            raise
     
     def generate(self, prompt: str, max_tokens: int = 512) -> str:
         """
@@ -220,15 +342,22 @@ class LLMGenerator:
         Returns:
             Generated explanation text
         """
-        # TODO: Implement in Phase 3.5.1
-        # response = self.llm(
-        #     prompt,
-        #     max_tokens=max_tokens,
-        #     temperature=0.7,
-        #     top_p=0.9
-        # )
-        # return response['choices'][0]['text']
-        return ""
+        if not self.llm:
+            return "Error: LLM model not initialized."
+
+        try:
+            response = self.llm.create_chat_completion(
+                messages=[
+                    {"role": "system", "content": "You are an expert industrial maintenance assistant."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=max_tokens,
+                temperature=0.7,
+                top_p=0.9
+            )
+            return response['choices'][0]['message']['content']
+        except Exception as e:
+            return f"Error generating explanation: {e}"
 
 
 class UnifiedInferenceService:
@@ -278,8 +407,8 @@ class UnifiedInferenceService:
         """Load default configuration"""
         return {
             'max_cached_models': 5,
-            'llm_model_file': 'llama-3.1-8b-instruct-q4_k_m.gguf',
-            'rag_top_k': 5,
+            'llm_model_file': 'llama-3.1-8b-instruct-q4.gguf',
+            'rag_top_k': 3,
             'llm_max_tokens': 512,
             'timeout_seconds': 65
         }
@@ -293,7 +422,10 @@ class UnifiedInferenceService:
         
         # Load RAG index
         print("  Loading RAG index...")
-        self.rag_retriever.load_index()
+        try:
+            self.rag_retriever.load_index()
+        except Exception as e:
+            print(f"  ⚠️ RAG loading failed: {e}. Continuing without RAG.")
         
         # Load LLM model
         print("  Loading LLM model...")

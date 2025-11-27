@@ -87,6 +87,18 @@ class RULPredictor:
             # Convert to DataFrame
             df = pd.DataFrame([sensor_data])
             
+            # Filter and align features
+            if hasattr(self, 'feature_names') and self.feature_names:
+                # Ensure all required features are present
+                missing_features = [f for f in self.feature_names if f not in df.columns]
+                if missing_features:
+                    # print(f"⚠️ Warning: {len(missing_features)} features missing, filling with 0.0")
+                    for f in missing_features:
+                        df[f] = 0.0
+                
+                # Select only required columns (ignores extra columns like timestamp)
+                df = df[self.feature_names]
+            
             # Get RUL prediction
             rul_prediction = self.model.predict(df)
             rul_hours = float(rul_prediction.iloc[0])
