@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Test Client - GAN Training Progress</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            color: #e2e8f0;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        h1 {
+            font-size: 32px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            font-size: 14px;
+            color: #94a3b8;
+        }
+
+        .card {
+            background: rgba(31, 41, 55, 0.6);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+
+        .card-title {
+            font-size: 18px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .status-disconnected {
+            background: #ef4444;
+            color: white;
+        }
+
+        .status-connected {
+            background: #10b981;
+            color: white;
+        }
+
+        .status-connecting {
+            background: #fbbf24;
+            color: #1f2937;
+        }
+
+        .input-group {
+            margin-bottom: 16px;
+        }
+
+        label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            color: #cbd5e1;
+            margin-bottom: 8px;
+        }
+
+        input[type="text"], select {
+            width: 100%;
+            padding: 12px 16px;
+            background: rgba(15, 23, 42, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            color: #e2e8f0;
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+
+        input[type="text"]:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 12px;
+        }
+
+        button {
+            flex: 1;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: rgba(71, 85, 105, 0.5);
+            color: #e2e8f0;
+        }
+
+        .btn-secondary:hover {
+            background: rgba(71, 85, 105, 0.7);
+        }
+
+        .btn-danger {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+            border: 1px solid #ef4444;
+        }
+
+        .btn-danger:hover {
+            background: rgba(239, 68, 68, 0.3);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .progress-section {
+            margin-top: 20px;
+        }
+
+        .progress-bar-container {
+            width: 100%;
+            height: 32px;
+            background: rgba(15, 23, 42, 0.8);
+            border-radius: 16px;
+            overflow: hidden;
+            position: relative;
+            margin-bottom: 12px;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            margin-top: 16px;
+        }
+
+        .metric-card {
+            background: rgba(15, 23, 42, 0.5);
+            padding: 12px 16px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .metric-label {
+            font-size: 12px;
+            color: #94a3b8;
+            margin-bottom: 4px;
+        }
+
+        .metric-value {
+            font-size: 20px;
+            font-weight: 700;
+            color: #e2e8f0;
+        }
+
+        .logs-container {
+            background: rgba(15, 23, 42, 0.8);
+            border-radius: 8px;
+            padding: 16px;
+            height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+
+        .log-entry {
+            margin-bottom: 8px;
+            padding: 8px;
+            border-radius: 4px;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .log-connected { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        .log-progress { background: rgba(102, 126, 234, 0.1); color: #667eea; }
+        .log-closing { background: rgba(251, 191, 36, 0.1); color: #fbbf24; }
+        .log-error { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+        .log-info { color: #94a3b8; }
+
+        .log-timestamp {
+            color: #64748b;
+            margin-right: 8px;
+        }
+
+        /* Scrollbar styling */
+        .logs-container::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .logs-container::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.5);
+            border-radius: 4px;
+        }
+
+        .logs-container::-webkit-scrollbar-thumb {
+            background: rgba(102, 126, 234, 0.5);
+            border-radius: 4px;
+        }
+
+        .logs-container::-webkit-scrollbar-thumb:hover {
+            background: rgba(102, 126, 234, 0.7);
+        }
+
+        .pulse {
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚀 WebSocket Test Client</h1>
+            <p class="subtitle">Real-time GAN Training Progress Monitor</p>
+        </header>
+
+        <!-- Connection Settings Card -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">⚙️ Connection Settings</div>
+                <span class="status-badge" id="statusBadge">Disconnected</span>
+            </div>
+
+            <div class="input-group">
+                <label for="endpointSelect">WebSocket Endpoint</label>
+                <select id="endpointSelect">
+                    <option value="gan">GAN Training: /ws/gan/training/{task_id}</option>
+                    <option value="generic">Generic Task: /ws/tasks/{task_id}/progress</option>
+                    <option value="heartbeat">Heartbeat: /ws/heartbeat</option>
+                </select>
+            </div>
+
+            <div class="input-group" id="taskIdGroup">
+                <label for="taskId">Task ID</label>
+                <input type="text" id="taskId" placeholder="Enter Celery task ID (e.g., a1b2c3d4-e5f6-7890-abcd-123456789012)" value="">
+            </div>
+
+            <div class="input-group" id="channelPrefixGroup" style="display: none;">
+                <label for="channelPrefix">Channel Prefix</label>
+                <input type="text" id="channelPrefix" placeholder="e.g., gan:training" value="gan:training">
+            </div>
+
+            <div class="button-group">
+                <button class="btn-primary" id="connectBtn">🔌 Connect</button>
+                <button class="btn-danger" id="disconnectBtn" disabled>🔌 Disconnect</button>
+                <button class="btn-secondary" id="clearLogsBtn">🗑️ Clear Logs</button>
+            </div>
+        </div>
+
+        <!-- Progress Card -->
+        <div class="card" id="progressCard" style="display: none;">
+            <div class="card-header">
+                <div class="card-title">📊 Training Progress</div>
+            </div>
+
+            <div class="progress-section">
+                <div class="progress-bar-container">
+                    <div class="progress-bar" id="progressBar" style="width: 0%">0%</div>
+                </div>
+
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <div class="metric-label">Current Epoch</div>
+                        <div class="metric-value" id="currentEpoch">-</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Total Epochs</div>
+                        <div class="metric-value" id="totalEpochs">-</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Loss</div>
+                        <div class="metric-value" id="lossValue">-</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Status</div>
+                        <div class="metric-value" id="statusValue">-</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Message Logs Card -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">📝 Message Logs</div>
+                <span id="messageCount" style="font-size: 12px; color: #94a3b8;">0 messages</span>
+            </div>
+            <div class="logs-container" id="logsContainer">
+                <div class="log-entry log-info">
+                    <span class="log-timestamp">[System]</span>
+                    Ready to connect. Select an endpoint and click Connect.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let messageCount = 0;
+        let reconnectAttempts = 0;
+        const MAX_RECONNECT_ATTEMPTS = 3;
+
+        const elements = {
+            endpointSelect: document.getElementById('endpointSelect'),
+            taskId: document.getElementById('taskId'),
+            channelPrefix: document.getElementById('channelPrefix'),
+            taskIdGroup: document.getElementById('taskIdGroup'),
+            channelPrefixGroup: document.getElementById('channelPrefixGroup'),
+            connectBtn: document.getElementById('connectBtn'),
+            disconnectBtn: document.getElementById('disconnectBtn'),
+            clearLogsBtn: document.getElementById('clearLogsBtn'),
+            statusBadge: document.getElementById('statusBadge'),
+            progressCard: document.getElementById('progressCard'),
+            progressBar: document.getElementById('progressBar'),
+            currentEpoch: document.getElementById('currentEpoch'),
+            totalEpochs: document.getElementById('totalEpochs'),
+            lossValue: document.getElementById('lossValue'),
+            statusValue: document.getElementById('statusValue'),
+            logsContainer: document.getElementById('logsContainer'),
+            messageCount: document.getElementById('messageCount')
+        };
+
+        // Endpoint selection handler
+        elements.endpointSelect.addEventListener('change', (e) => {
+            const endpoint = e.target.value;
+            if (endpoint === 'heartbeat') {
+                elements.taskIdGroup.style.display = 'none';
+                elements.channelPrefixGroup.style.display = 'none';
+            } else if (endpoint === 'generic') {
+                elements.taskIdGroup.style.display = 'block';
+                elements.channelPrefixGroup.style.display = 'block';
+            } else {
+                elements.taskIdGroup.style.display = 'block';
+                elements.channelPrefixGroup.style.display = 'none';
+            }
+        });
+
+        // Connect button handler
+        elements.connectBtn.addEventListener('click', connect);
+        elements.disconnectBtn.addEventListener('click', disconnect);
+        elements.clearLogsBtn.addEventListener('click', clearLogs);
+
+        function connect() {
+            const endpoint = elements.endpointSelect.value;
+            let wsUrl;
+
+            if (endpoint === 'heartbeat') {
+                wsUrl = 'ws://localhost:8000/ws/heartbeat';
+            } else if (endpoint === 'generic') {
+                const taskId = elements.taskId.value.trim();
+                const channelPrefix = elements.channelPrefix.value.trim();
+                if (!taskId) {
+                    addLog('error', 'Please enter a task ID');
+                    return;
+                }
+                wsUrl = `ws://localhost:8000/ws/tasks/${taskId}/progress?channel_prefix=${encodeURIComponent(channelPrefix)}`;
+            } else {
+                const taskId = elements.taskId.value.trim();
+                if (!taskId) {
+                    addLog('error', 'Please enter a task ID');
+                    return;
+                }
+                wsUrl = `ws://localhost:8000/ws/gan/training/${taskId}`;
+            }
+
+            updateStatus('connecting');
+            addLog('info', `Connecting to: ${wsUrl}`);
+
+            try {
+                ws = new WebSocket(wsUrl);
+
+                ws.onopen = () => {
+                    updateStatus('connected');
+                    addLog('connected', 'WebSocket connection established');
+                    reconnectAttempts = 0;
+                };
+
+                ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        handleMessage(data);
+                    } catch (e) {
+                        addLog('error', `Failed to parse message: ${e.message}`);
+                    }
+                };
+
+                ws.onerror = (error) => {
+                    addLog('error', 'WebSocket error occurred');
+                    console.error('WebSocket error:', error);
+                };
+
+                ws.onclose = (event) => {
+                    updateStatus('disconnected');
+                    addLog('closing', `Connection closed (code: ${event.code})`);
+                    
+                    // Auto-reconnect for training endpoints
+                    if (endpoint !== 'heartbeat' && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                        reconnectAttempts++;
+                        addLog('info', `Reconnection attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS} in 3 seconds...`);
+                        setTimeout(connect, 3000);
+                    }
+                };
+            } catch (e) {
+                addLog('error', `Connection failed: ${e.message}`);
+                updateStatus('disconnected');
+            }
+        }
+
+        function disconnect() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.close();
+                addLog('info', 'Disconnecting...');
+            }
+        }
+
+        function handleMessage(data) {
+            messageCount++;
+            elements.messageCount.textContent = `${messageCount} messages`;
+
+            const type = data.type || 'unknown';
+
+            switch (type) {
+                case 'connected':
+                    addLog('connected', `Connected to channel: ${data.channel || 'N/A'}`);
+                    break;
+
+                case 'progress':
+                    handleProgressUpdate(data);
+                    break;
+
+                case 'closing':
+                    addLog('closing', `Connection closing: ${data.reason || 'Task completed'}`);
+                    break;
+
+                case 'heartbeat':
+                    addLog('info', `❤️ Heartbeat #${data.count}: ${new Date(data.timestamp).toLocaleTimeString()}`);
+                    break;
+
+                case 'error':
+                    addLog('error', `Error: ${data.message}`);
+                    break;
+
+                case 'timeout':
+                    addLog('closing', 'Connection timeout (2 hours)');
+                    break;
+
+                default:
+                    addLog('info', `Unknown message type: ${type}`);
+            }
+        }
+
+        function handleProgressUpdate(data) {
+            // Show progress card
+            elements.progressCard.style.display = 'block';
+
+            // Update progress bar
+            const progress = data.progress || 0;
+            elements.progressBar.style.width = `${progress}%`;
+            elements.progressBar.textContent = `${progress.toFixed(1)}%`;
+
+            // Update metrics
+            if (data.current !== undefined) elements.currentEpoch.textContent = data.current;
+            if (data.total !== undefined) elements.totalEpochs.textContent = data.total;
+            if (data.loss !== undefined) elements.lossValue.textContent = data.loss.toFixed(4);
+            if (data.status !== undefined) elements.statusValue.textContent = data.status;
+
+            // Add to logs
+            const message = data.message || `Progress: ${progress.toFixed(1)}%`;
+            addLog('progress', message);
+        }
+
+        function addLog(type, message) {
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            
+            const timestamp = new Date().toLocaleTimeString();
+            entry.innerHTML = `<span class="log-timestamp">[${timestamp}]</span>${message}`;
+            
+            elements.logsContainer.appendChild(entry);
+            elements.logsContainer.scrollTop = elements.logsContainer.scrollHeight;
+        }
+
+        function clearLogs() {
+            elements.logsContainer.innerHTML = '';
+            messageCount = 0;
+            elements.messageCount.textContent = '0 messages';
+            addLog('info', 'Logs cleared');
+        }
+
+        function updateStatus(status) {
+            const badge = elements.statusBadge;
+            badge.className = `status-badge status-${status}`;
+            
+            switch (status) {
+                case 'connected':
+                    badge.textContent = '🟢 Connected';
+                    elements.connectBtn.disabled = true;
+                    elements.disconnectBtn.disabled = false;
+                    break;
+                case 'connecting':
+                    badge.textContent = '🟡 Connecting...';
+                    badge.classList.add('pulse');
+                    elements.connectBtn.disabled = true;
+                    elements.disconnectBtn.disabled = true;
+                    break;
+                case 'disconnected':
+                    badge.textContent = '🔴 Disconnected';
+                    badge.classList.remove('pulse');
+                    elements.connectBtn.disabled = false;
+                    elements.disconnectBtn.disabled = true;
+                    break;
+            }
+        }
+    </script>
+</body>
+</html>

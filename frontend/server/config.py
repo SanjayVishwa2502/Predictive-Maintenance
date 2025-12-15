@@ -32,7 +32,10 @@ class Settings(BaseSettings):
     DATABASE_MAX_OVERFLOW: int = 10
     
     # Redis
+    REDIS_HOST: str = "localhost"
+    REDIS_PORT: int = 6379
     REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_CACHE_DB: int = 3  # DB 3 for API response caching
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"
     
