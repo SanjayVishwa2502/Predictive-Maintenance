@@ -1,0 +1,18 @@
+# Example: Augmented datasets
+# This directory contains large synthetic datasets generated from refined models
+
+# Example structure:
+# motor_siemens_001/
+#   ├── train.parquet             # 35,000 samples (70%)
+#   ├── val.parquet               # 7,500 samples (15%)
+#   ├── test.parquet              # 7,500 samples (15%)
+#   └── augmentation_config.json  # Model used, generation timestamp
+
+# Use case:
+# Start with 500 real samples → Refine TVAE → Generate 50,000 augmented samples
+
+# Quality checks:
+# - Temporal structure preserved (RUL decreasing)
+# - Sensor correlations maintained
+# - Distribution matches real data
+# - Passes same validation as seed data

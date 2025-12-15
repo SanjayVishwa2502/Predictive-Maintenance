@@ -1,0 +1,35 @@
+# FastAPI Backend Requirements
+# Phase 3.7.1.1: Project Initialization - Industrial Grade
+# Generated: December 13, 2025
+
+# Core Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0.post1
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# Database
+sqlalchemy==2.0.23
+psycopg2-binary==2.9.9
+alembic==1.13.1
+
+# Task Queue
+celery==5.3.4
+redis==5.0.1
+flower==2.0.1
+
+# Authentication & Security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.6
+
+# HTTP Client
+httpx==0.25.2
+aiofiles==23.2.1
+
+# Utilities
+python-dotenv==1.0.0
+pytz==2023.3.post1
+
+# Monitoring & Logging
+prometheus-client==0.19.0

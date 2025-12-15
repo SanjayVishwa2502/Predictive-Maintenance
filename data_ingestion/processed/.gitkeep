@@ -1,0 +1,15 @@
+# Example: Processed data after validation and cleaning
+# This directory contains cleaned and transformed datasets
+
+# Example structure:
+# motor_siemens_001/
+#   ├── mapped_data.parquet       # Columns renamed to match sensors
+#   ├── cleaned_data.parquet      # Missing values handled, outliers clipped
+#   └── validation_report.json    # Data quality metrics
+
+# Processing steps:
+# 1. Column mapping (fuzzy matching)
+# 2. Missing value imputation (interpolation, ffill, bfill)
+# 3. Outlier handling (clip to 3σ)
+# 4. Timestamp sorting and validation
+# 5. RUL recalculation (if applicable)

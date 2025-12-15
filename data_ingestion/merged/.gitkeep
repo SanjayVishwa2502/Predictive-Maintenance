@@ -1,0 +1,14 @@
+# Example: Merged datasets (seed + real data)
+# This directory contains combined datasets for TVAE training
+
+# Example structure:
+# motor_siemens_001/
+#   ├── seed_10000.parquet        # Original seed data
+#   ├── real_5000.parquet         # Real data (after processing)
+#   ├── merged_15000.parquet      # Combined dataset
+#   └── merge_config.json         # Merge strategy used
+
+# Merge strategies:
+# 1. Replace: Use only real data (if >5000 samples)
+# 2. Merge: Combine seed + real data (hybrid approach)
+# 3. Real-Only: Skip seed generation entirely (new machines)

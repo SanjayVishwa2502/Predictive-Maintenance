@@ -126,7 +126,7 @@ def check_cycles(df, machine_id):
     """
     Check if data contains multiple life cycles (RUL resets).
     
-    A cycle reset is when RUL jumps up significantly (e.g., 10 → 500).
+    A cycle reset is when RUL jumps up significantly (e.g., 10 -> 500).
     
     Args:
         df: DataFrame with 'rul' column

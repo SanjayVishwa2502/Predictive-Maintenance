@@ -1,0 +1,19 @@
+# Example: Quality comparison reports
+# This directory contains statistical comparison reports
+
+# Example structure:
+# motor_siemens_001_comparison.json  # Statistical metrics
+# motor_siemens_001_comparison.pdf   # Visual comparison (plots)
+# all_machines_summary.csv           # Batch comparison results
+
+# Comparison metrics:
+# - KL-divergence (real vs synthetic)
+# - Wasserstein distance
+# - Correlation matrix error
+# - Per-sensor mean/std error
+
+# Visual comparisons:
+# - Distribution histograms
+# - Correlation heatmaps
+# - Time series plots
+# - RUL degradation curves

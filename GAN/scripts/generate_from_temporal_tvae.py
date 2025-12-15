@@ -46,7 +46,7 @@ def generate_temporal_data(machine_id, num_samples=50000, train_split=0.70, val_
     
     # Paths
     project_root = Path(__file__).parent.parent
-    model_path = project_root / "models" / "tvae" / "temporal" / f"{machine_id}_tvae_temporal_500epochs.pkl"
+    model_dir = project_root / "models" / "tvae" / "temporal"
     output_dir = project_root / "data" / "synthetic" / machine_id
     reports_dir = project_root / "reports" / "generation"
     
@@ -56,11 +56,19 @@ def generate_temporal_data(machine_id, num_samples=50000, train_split=0.70, val_
     
     # Step 1: Load retrained TVAE model
     print(f"[1/6] Loading retrained temporal TVAE model")
-    if not model_path.exists():
+    
+    # Find model file with any epoch count
+    model_files = list(model_dir.glob(f"{machine_id}_tvae_temporal_*.pkl"))
+    
+    if not model_files:
         raise FileNotFoundError(
-            f"Temporal TVAE model not found: {model_path}\n"
+            f"Temporal TVAE model not found for machine: {machine_id}\n"
+            f"Searched in: {model_dir}\n"
             f"Please run Phase 1.6 Weeks 2-3 retraining first."
         )
+    
+    # Use the most recent model if multiple exist
+    model_path = sorted(model_files, key=lambda p: p.stat().st_mtime)[-1]
     
     print(f"   Model: {model_path.name}")
     tvae = TVAESynthesizer.load(str(model_path))
@@ -89,7 +97,7 @@ def generate_temporal_data(machine_id, num_samples=50000, train_split=0.70, val_
     synthetic_data = synthetic_data.sort_values('rul', ascending=False).reset_index(drop=True)
     synthetic_data['timestamp'] = pd.date_range(start='2024-01-01', periods=len(synthetic_data), freq='1H')
     
-    print(f"   - First RUL: {synthetic_data['rul'].iloc[0]:.2f} → Last RUL: {synthetic_data['rul'].iloc[-1]:.2f}")
+    print(f"   - First RUL: {synthetic_data['rul'].iloc[0]:.2f} -> Last RUL: {synthetic_data['rul'].iloc[-1]:.2f}")
     print(f"   - First timestamp: {synthetic_data['timestamp'].iloc[0]}")
     print(f"   - Last timestamp: {synthetic_data['timestamp'].iloc[-1]}")
     

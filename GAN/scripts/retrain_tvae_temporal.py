@@ -91,7 +91,7 @@ def retrain_machine_tvae_temporal(machine_id, config, test_mode=False):
     
     # Paths
     project_root = Path(__file__).parent.parent
-    seed_path = project_root / "seed_data" / "temporal" / f"{machine_id}_temporal_seed.parquet"
+    seed_dir = project_root / "seed_data" / "temporal"
     models_dir = project_root / "models" / "tvae" / "temporal"
     reports_dir = project_root / "reports" / "tvae_temporal"
     
@@ -99,13 +99,22 @@ def retrain_machine_tvae_temporal(machine_id, config, test_mode=False):
     models_dir.mkdir(parents=True, exist_ok=True)
     reports_dir.mkdir(parents=True, exist_ok=True)
     
-    # Step 1: Load temporal seed data
-    print(f"[1/7] Loading temporal seed data from: {seed_path.name}")
-    if not seed_path.exists():
+    # Step 1: Load temporal seed data (with pattern matching for various naming formats)
+    print(f"[1/7] Loading temporal seed data for: {machine_id}")
+    
+    # Try to find seed data files with pattern matching
+    seed_pattern = list(seed_dir.glob(f"{machine_id}*temporal_seed.parquet"))
+    
+    if not seed_pattern:
         raise FileNotFoundError(
-            f"Temporal seed data not found: {seed_path}\n"
+            f"Temporal seed data not found for: {machine_id}\n"
+            f"Searched in: {seed_dir}\n"
             f"Please run Phase 1.6 Days 3-5 first to generate temporal seed data."
         )
+    
+    # Use the first matching file
+    seed_path = seed_pattern[0]
+    print(f"   Found seed file: {seed_path.name}")
     
     seed_data = pd.read_parquet(seed_path)
     print(f"   Seed data shape: {seed_data.shape}")
@@ -161,9 +170,18 @@ def retrain_machine_tvae_temporal(machine_id, config, test_mode=False):
         print(f"   Note: RTX 4070 GPU acceleration enabled")
     
     print(f"\n   Training in progress...")
+    sys.stdout.flush()
+    
+    # Force unbuffered output for tqdm
+    import os
+    os.environ['PYTHONUNBUFFERED'] = '1'
     
     train_start = time.time()
+    
+    # Train model (SDV/CTGAN uses tqdm which prints real progress to stderr)
+    # We capture stderr in gan_manager.py so real progress will be shown
     synthesizer.fit(seed_data)
+    
     train_time = time.time() - train_start
     
     print(f"\n   Training completed in: {train_time:.2f} seconds ({train_time/60:.2f} minutes)")

@@ -29,8 +29,12 @@ RUL_PROFILES = {
         'machines': [
             'motor_siemens_1la7_001',
             'motor_abb_m3bp_002',
-            'motor_weg_w22_003'
-        ],
+            'motor_weg_w22_003',
+            'induction_1'
+            'induction_3',
+            'induction_4',
+            'induction_6',
+            'induction_motor_abb_m2ba_test001'],
         'max_rul': 1000,                    # Hours to failure
         'cycles_per_dataset': 3,             # 3 complete life cycles in 50K samples
         'degradation_pattern': 'linear_slow',
@@ -72,8 +76,8 @@ RUL_PROFILES = {
     'compressor': {
         'machines': [
             'compressor_ingersoll_rand_2545_009',
-            'compressor_atlas_copco_ga30_001'
-        ],
+            'compressor_atlas_copco_ga30_001',
+            'compressor_ingersoll_rand_001'],
         'max_rul': 600,
         'cycles_per_dataset': 5,
         'degradation_pattern': 'linear_fast',
@@ -99,8 +103,7 @@ RUL_PROFILES = {
             'cnc_makino_a51nx_001',
             'cnc_mazak_variaxis_001',
             'cnc_okuma_lb3000_001',
-            'cnc_fanuc_robodrill_001'
-        ],
+            'cnc_fanuc_robodrill_001'],
         'max_rul': 500,                      # Cutting tool life (not machine life)
         'cycles_per_dataset': 7,             # Multiple tool changes
         'degradation_pattern': 'exponential', # Tool wear accelerates

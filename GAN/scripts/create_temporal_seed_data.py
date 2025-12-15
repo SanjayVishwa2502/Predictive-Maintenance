@@ -25,7 +25,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from config.rul_profiles import RUL_PROFILES, get_machine_category, get_rul_profile
 
 
-def create_temporal_seed_data(machine_id, rul_profile, n_samples=10000):
+def create_temporal_seed_data(machine_id, rul_profile, n_samples=50000):
     """
     Create seed data with temporal structure and RUL
     
@@ -37,7 +37,7 @@ def create_temporal_seed_data(machine_id, rul_profile, n_samples=10000):
     Args:
         machine_id: Machine identifier
         rul_profile: RUL configuration from rul_profiles.py
-        n_samples: Total samples (default 10000, matching original seed size)
+        n_samples: Total samples (default 50000, matching original production config)
         
     Returns:
         DataFrame with temporal structure, RUL, and degrading sensors
@@ -92,7 +92,7 @@ def create_temporal_seed_data(machine_id, rul_profile, n_samples=10000):
     full_data['timestamp'] = pd.date_range(
         start='2024-01-01',
         periods=len(full_data),
-        freq='1H'
+        freq='1h'
     )
     
     # Reorder columns: timestamp, rul, sensors
@@ -103,7 +103,7 @@ def create_temporal_seed_data(machine_id, rul_profile, n_samples=10000):
     print(f"Seed data creation complete!")
     print(f"  Total samples: {len(full_data)}")
     print(f"  Features: {len(full_data.columns)}")
-    print(f"  RUL range: {full_data['rul'].max():.0f} → {full_data['rul'].min():.0f}")
+    print(f"  RUL range: {full_data['rul'].max():.0f} -> {full_data['rul'].min():.0f}")
     print(f"  Time range: {full_data['timestamp'].min()} to {full_data['timestamp'].max()}")
     print(f"{'=' * 70}\n")
     
@@ -145,7 +145,7 @@ def generate_single_degradation_cycle(machine_id, cycle_samples, max_rul,
     # ============================================
     # STEP 2: Calculate degradation factor
     # ============================================
-    # degradation: 0 (healthy) → 1 (failure)
+    # degradation: 0 (healthy) -> 1 (failure)
     degradation = 1 - (rul / max_rul)
     
     # ============================================
@@ -337,7 +337,7 @@ def generate_all_machine_seed_data():
                 
                 machine_time = time.time() - machine_start
                 
-                print(f"✅ Saved: {output_path.name} ({machine_time:.1f}s)")
+                print(f"[OK] Saved: {output_path.name} ({machine_time:.1f}s)")
                 
                 # Verify RUL decreasing
                 rul_diff = seed_data['rul'].diff().dropna()
@@ -354,7 +354,7 @@ def generate_all_machine_seed_data():
                 })
                 
             except Exception as e:
-                print(f"❌ FAILED: {machine_id}")
+                print(f"[FAIL] FAILED: {machine_id}")
                 print(f"   Error: {str(e)}")
                 results.append({
                     'machine_id': machine_id,
@@ -369,10 +369,10 @@ def generate_all_machine_seed_data():
     print(f"\n{'=' * 70}")
     print(f"BATCH COMPLETE")
     print(f"{'=' * 70}")
-    print(f"✅ Success: {success_count}/26")
-    print(f"❌ Failed: {26 - success_count}/26")
+    print(f"[OK] Success: {success_count}/26")
+    print(f"[FAIL] Failed: {26 - success_count}/26")
     print(f"⏱️  Total time: {total_time/60:.1f} minutes")
-    print(f"📊 Average per machine: {total_time/26:.1f} seconds")
+    print(f"[INFO] Average per machine: {total_time/26:.1f} seconds")
     
     # Quality check
     if success_count > 0:
@@ -402,21 +402,29 @@ def generate_all_machine_seed_data():
 
 if __name__ == "__main__":
     import sys
+    import importlib
     
     if len(sys.argv) > 1:
         # Single machine mode
         machine_id = sys.argv[1]
         
-        # Find machine category
-        category = get_machine_category(machine_id)
+        # Reload rul_profiles to pick up any recent changes
+        from config import rul_profiles as rul_profiles_module
+        importlib.reload(rul_profiles_module)
+        from config.rul_profiles import RUL_PROFILES as FRESH_RUL_PROFILES
+        from config.rul_profiles import get_machine_category as fresh_get_machine_category
+        from config.rul_profiles import get_rul_profile as fresh_get_rul_profile
+        
+        # Use fresh imports for single machine mode
+        category = fresh_get_machine_category(machine_id)
         if category is None:
             print(f"ERROR: Machine '{machine_id}' not found in RUL profiles")
             print(f"\nAvailable machines:")
-            for cat, prof in RUL_PROFILES.items():
+            for cat, prof in FRESH_RUL_PROFILES.items():
                 print(f"  {cat}: {', '.join(prof['machines'])}")
             sys.exit(1)
         
-        rul_profile = get_rul_profile(machine_id)
+        rul_profile = fresh_get_rul_profile(machine_id)
         
         print(f"Machine: {machine_id}")
         print(f"Category: {category}")
@@ -430,12 +438,12 @@ if __name__ == "__main__":
         output_path.parent.mkdir(parents=True, exist_ok=True)
         seed_data.to_parquet(output_path, index=False)
         
-        print(f"✅ Saved: {output_path.relative_to(base_path)}")
+        print(f"[OK] Saved: {output_path.relative_to(base_path)}")
         
         # Quick validation
         rul_diff = seed_data['rul'].diff().dropna()
         decreasing_pct = (rul_diff <= 10).sum() / len(rul_diff) * 100
-        print(f"✅ RUL decreasing: {decreasing_pct:.1f}%")
+        print(f"[OK] RUL decreasing: {decreasing_pct:.1f}%")
         
         sys.exit(0)
     else:

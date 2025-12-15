@@ -1,0 +1,16 @@
+# Example: Raw uploaded file
+# This directory will contain original uploaded datasets (unmodified)
+# Files are organized by machine_id
+
+# Example structure after uploads:
+# motor_siemens_001/
+#   ├── scada_export_2024.csv
+#   ├── maintenance_logs.xlsx
+#   └── upload_metadata.json
+
+# Each upload creates:
+# 1. Original file (preserved forever)
+# 2. upload_metadata.json (timestamp, user, format, file_size)
+
+# File size limit: 500MB per file
+# Supported formats: CSV, Excel, Parquet, JSON, SCADA exports

@@ -1,0 +1,21 @@
+# Example: Refined TVAE models
+# This directory contains models refined using transfer learning
+
+# Example structure:
+# motor_siemens_001/
+#   ├── original_tvae.pkl         # Original model (seed-trained)
+#   ├── refined_tvae.pkl          # Refined model (real-data trained)
+#   ├── training_comparison.json  # Loss curves comparison
+#   └── refinement_config.json    # Epochs, learning rate, freeze_encoder
+
+# Refinement approach:
+# 1. Load existing TVAE model (seed-trained)
+# 2. Continue training on real/merged data
+# 3. Use 10x lower learning rate (0.0001 vs 0.001)
+# 4. Train for fewer epochs (50-100 vs 300)
+# 5. Early stopping if loss plateaus
+
+# Quality metrics:
+# - Loss reduction vs original model
+# - KL-divergence vs real data
+# - Correlation matrix comparison
