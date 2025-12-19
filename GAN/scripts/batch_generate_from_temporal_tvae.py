@@ -13,7 +13,7 @@ from datetime import datetime
 
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
-from config.rul_profiles import RUL_PROFILES
+from GAN.config.rul_profiles import RUL_PROFILES
 from scripts.generate_from_temporal_tvae import generate_temporal_data
 
 

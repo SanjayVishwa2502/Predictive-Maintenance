@@ -399,6 +399,143 @@ async def broadcast_to_channel(channel: str, data: Dict[str, Any]):
 
 
 # ============================================================================
+# ML SENSOR STREAMING ENDPOINT
+# ============================================================================
+
+@router.websocket("/ws/ml/sensors/{machine_id}")
+async def ml_sensor_stream(websocket: WebSocket, machine_id: str):
+    """
+    Stream real-time sensor data for a specific machine
+    
+    This endpoint streams sensor readings every 5 seconds for the selected machine.
+    Frontend connects to this endpoint to display live sensor dashboard.
+    
+    Args:
+        websocket: WebSocket connection
+        machine_id: Machine identifier (e.g., motor_siemens_1la7_001)
+    
+    Message Format:
+        {
+            "type": "sensor_update",
+            "machine_id": "motor_siemens_1la7_001",
+            "timestamp": "2025-12-15T10:45:23.123Z",
+            "sensors": {
+                "bearing_de_temp_C": 65.2,
+                "bearing_nde_temp_C": 62.1,
+                "winding_temp_C": 55.3,
+                ...
+            },
+            "sensor_count": 22
+        }
+    
+    Connection Flow:
+        1. Client connects with machine_id
+        2. Server accepts connection
+        3. Server streams sensor updates every 5 seconds
+        4. Client disconnects when switching machines or closing dashboard
+    
+    Timeout: 2 hours (then auto-disconnect)
+    """
+    try:
+        # Accept WebSocket connection
+        await websocket.accept()
+        logger.info(f"ML sensor stream connected for machine: {machine_id}")
+        
+        # Send connection confirmation
+        await websocket.send_json({
+            "type": "connected",
+            "machine_id": machine_id,
+            "message": f"Sensor stream connected for {machine_id}",
+            "update_interval_seconds": 5,
+            "timestamp": datetime.utcnow().isoformat() + "Z"
+        })
+        
+        # Import MLManager (lazy import to avoid circular dependency)
+        import sys
+        from pathlib import Path
+        sys.path.append(str(Path(__file__).resolve().parents[2]))
+        from services.ml_manager import ml_manager
+        
+        # Verify machine exists
+        try:
+            _ = await ml_manager.get_machine_status(machine_id)
+        except FileNotFoundError:
+            await websocket.send_json({
+                "type": "error",
+                "error": "Machine not found",
+                "detail": f"Machine '{machine_id}' does not exist",
+                "timestamp": datetime.utcnow().isoformat() + "Z"
+            })
+            await websocket.close()
+            return
+        
+        # Stream sensor data every 5 seconds
+        timeout = 7200  # 2 hours
+        start_time = asyncio.get_event_loop().time()
+        
+        while True:
+            # Check timeout
+            elapsed = asyncio.get_event_loop().time() - start_time
+            if elapsed > timeout:
+                logger.info(f"ML sensor stream timeout for {machine_id} (2 hours)")
+                await websocket.send_json({
+                    "type": "timeout",
+                    "message": "Connection timeout after 2 hours",
+                    "timestamp": datetime.utcnow().isoformat() + "Z"
+                })
+                break
+            
+            try:
+                # Get latest sensor data from MLManager
+                status = await ml_manager.get_machine_status(machine_id)
+                
+                # Send sensor update
+                await websocket.send_json({
+                    "type": "sensor_update",
+                    "machine_id": machine_id,
+                    "timestamp": status['last_update'].isoformat() + "Z",
+                    "sensors": status['latest_sensors'],
+                    "sensor_count": status['sensor_count'],
+                    "is_running": status['is_running']
+                })
+                
+                # Wait 5 seconds before next update
+                await asyncio.sleep(5)
+                
+            except WebSocketDisconnect:
+                logger.info(f"Client disconnected from ML sensor stream: {machine_id}")
+                break
+            except Exception as e:
+                logger.error(f"Error streaming sensor data for {machine_id}: {e}")
+                await websocket.send_json({
+                    "type": "error",
+                    "error": "Stream error",
+                    "detail": str(e),
+                    "timestamp": datetime.utcnow().isoformat() + "Z"
+                })
+                await asyncio.sleep(5)  # Continue after error
+        
+        # Close connection
+        await websocket.close()
+        logger.info(f"ML sensor stream closed for {machine_id}")
+        
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected: ML sensor stream for {machine_id}")
+    except Exception as e:
+        logger.error(f"ML sensor stream error for {machine_id}: {e}")
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "error": "Connection error",
+                "detail": str(e),
+                "timestamp": datetime.utcnow().isoformat() + "Z"
+            })
+            await websocket.close()
+        except:
+            pass
+
+
+# ============================================================================
 # ROUTE REGISTRATION VERIFICATION
 # ============================================================================
 
@@ -408,4 +545,5 @@ if __name__ == '__main__':
     print("1. /ws/gan/training/{task_id} - GAN training progress")
     print("2. /ws/tasks/{task_id}/progress - Generic task progress")
     print("3. /ws/heartbeat - Health check")
+    print("4. /ws/ml/sensors/{machine_id} - ML sensor streaming")
     print("\nAll WebSocket routes registered successfully!")

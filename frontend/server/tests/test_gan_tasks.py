@@ -83,36 +83,32 @@ class TestProgressTask(unittest.TestCase):
     def test_update_progress(self, mock_broadcast):
         """Test progress update method"""
         task = ProgressTask()
-        
-        # Mock the request property properly
-        mock_request = Mock(id='test-task-789')
-        with patch.object(type(task), 'request', new_callable=PropertyMock) as mock_req:
-            mock_req.return_value = mock_request
-            task.update_state = Mock()
-            
-            task.update_progress(
-                machine_id='cnc_machine_003',
-                current=25,
-                total=100,
-                message='Processing',
-                stage='training'
-            )
-            
-            # Verify Celery state update
-            task.update_state.assert_called_once_with(
-                state='PROGRESS',
-                meta={
-                    'machine_id': 'cnc_machine_003',
-                    'current': 25,
-                    'total': 100,
-                    'progress': 25.0,
-                    'message': 'Processing',
-                    'stage': 'training'
-                }
-            )
-            
-            # Verify Redis broadcast
-            mock_broadcast.assert_called_once()
+
+        task.update_state = Mock()
+
+        task.update_progress(
+            machine_id='cnc_machine_003',
+            current=25,
+            total=100,
+            message='Processing',
+            stage='training'
+        )
+
+        # Verify Celery state update
+        task.update_state.assert_called_once_with(
+            state='PROGRESS',
+            meta={
+                'machine_id': 'cnc_machine_003',
+                'current': 25,
+                'total': 100,
+                'progress': 25.0,
+                'message': 'Processing',
+                'stage': 'training'
+            }
+        )
+
+        # Verify Redis broadcast
+        mock_broadcast.assert_called_once()
 
 
 class TestTrainTvaeTask(unittest.TestCase):
@@ -131,30 +127,25 @@ class TestTrainTvaeTask(unittest.TestCase):
         )
         mock_manager.train_tvae_model.return_value = mock_result
         
-        # Mock task request property
-        mock_request = Mock(id='train-task-001')
-        with patch.object(train_tvae_task, 'request', new_callable=PropertyMock) as mock_req:
-            mock_req.return_value = mock_request
-            with patch.object(train_tvae_task, 'update_state'):
-                
-                # Execute task - call the function directly
-                result = train_tvae_task.run('cnc_machine_004', epochs=100)
-                
-                # Verify result
-                self.assertTrue(result['success'])
-                self.assertEqual(result['machine_id'], 'cnc_machine_004')
-                self.assertEqual(result['epochs'], 100)
-                self.assertEqual(result['model_path'], '/models/cnc_machine_004_model.pkl')
-                self.assertEqual(result['final_loss'], 0.045)
-                
-                # Verify GANManager was called
-                mock_manager.train_tvae_model.assert_called_once_with(
-                    machine_id='cnc_machine_004',
-                    epochs=100
-                )
-                
-                # Verify progress was broadcast (at least twice: start and end)
-                self.assertGreaterEqual(mock_broadcast.call_count, 2)
+        with patch.object(train_tvae_task, 'update_state'):
+            # Execute task - call the function directly
+            result = train_tvae_task.run('cnc_machine_004', epochs=100)
+
+            # Verify result
+            self.assertTrue(result['success'])
+            self.assertEqual(result['machine_id'], 'cnc_machine_004')
+            self.assertEqual(result['epochs'], 100)
+            self.assertEqual(result['model_path'], '/models/cnc_machine_004_model.pkl')
+            self.assertEqual(result['final_loss'], 0.045)
+
+            # Verify GANManager was called
+            mock_manager.train_tvae_model.assert_called_once_with(
+                machine_id='cnc_machine_004',
+                epochs=100
+            )
+
+            # Verify progress was broadcast (at least twice: start and end)
+            self.assertGreaterEqual(mock_broadcast.call_count, 2)
     
     @patch('tasks.gan_tasks.gan_manager')
     @patch('tasks.gan_tasks.broadcast_progress')
@@ -162,20 +153,16 @@ class TestTrainTvaeTask(unittest.TestCase):
         """Test training with validation error"""
         mock_manager.train_tvae_model.side_effect = ValueError("Invalid machine_id")
         
-        mock_request = Mock(id='train-task-002')
-        with patch.object(train_tvae_task, 'request', new_callable=PropertyMock) as mock_req:
-            mock_req.return_value = mock_request
-            with patch.object(train_tvae_task, 'update_state'):
-                
-                with self.assertRaises(ValueError) as context:
-                    train_tvae_task.run('invalid_machine', epochs=100)
-                
-                self.assertIn("Invalid machine_id", str(context.exception))
-                
-                # Verify failure broadcast
-                failure_calls = [call for call in mock_broadcast.call_args_list 
-                                if 'FAILURE' in str(call)]
-                self.assertGreater(len(failure_calls), 0)
+        with patch.object(train_tvae_task, 'update_state'):
+            with self.assertRaises(ValueError) as context:
+                train_tvae_task.run('invalid_machine', epochs=100)
+
+            self.assertIn("Invalid machine_id", str(context.exception))
+
+            # Verify failure broadcast
+            failure_calls = [call for call in mock_broadcast.call_args_list 
+                            if 'FAILURE' in str(call)]
+            self.assertGreater(len(failure_calls), 0)
     
     @patch('tasks.gan_tasks.gan_manager')
     @patch('tasks.gan_tasks.broadcast_progress')
@@ -183,13 +170,9 @@ class TestTrainTvaeTask(unittest.TestCase):
         """Test training with missing seed data"""
         mock_manager.train_tvae_model.side_effect = FileNotFoundError("Seed data not found")
         
-        mock_request = Mock(id='train-task-003')
-        with patch.object(train_tvae_task, 'request', new_callable=PropertyMock) as mock_req:
-            mock_req.return_value = mock_request
-            with patch.object(train_tvae_task, 'update_state'):
-                
-                with self.assertRaises(FileNotFoundError):
-                    train_tvae_task.run('cnc_machine_005', epochs=100)
+        with patch.object(train_tvae_task, 'update_state'):
+            with self.assertRaises(FileNotFoundError):
+                train_tvae_task.run('cnc_machine_005', epochs=100)
 
 
 class TestGenerateDataTask(unittest.TestCase):
@@ -210,34 +193,30 @@ class TestGenerateDataTask(unittest.TestCase):
         )
         mock_manager.generate_synthetic_data.return_value = mock_result
         
-        mock_request = Mock(id='gen-task-001')
-        with patch.object(generate_data_task, 'request', new_callable=PropertyMock) as mock_req:
-            mock_req.return_value = mock_request
-            with patch.object(generate_data_task, 'update_state'):
-                
-                # Execute task
-                result = generate_data_task.run(
-                    'cnc_machine_006',
-                    train_samples=35000,
-                    val_samples=7500,
-                    test_samples=7500
-                )
-                
-                # Verify result
-                self.assertTrue(result['success'])
-                self.assertEqual(result['machine_id'], 'cnc_machine_006')
-                self.assertEqual(result['train_samples'], 35000)
-                self.assertEqual(result['val_samples'], 7500)
-                self.assertEqual(result['test_samples'], 7500)
-                self.assertEqual(result['train_file'], '/data/train.csv')
-                
-                # Verify GANManager was called
-                mock_manager.generate_synthetic_data.assert_called_once_with(
-                    machine_id='cnc_machine_006',
-                    train_samples=35000,
-                    val_samples=7500,
-                    test_samples=7500
-                )
+        with patch.object(generate_data_task, 'update_state'):
+            # Execute task
+            result = generate_data_task.run(
+                'cnc_machine_006',
+                train_samples=35000,
+                val_samples=7500,
+                test_samples=7500
+            )
+
+            # Verify result
+            self.assertTrue(result['success'])
+            self.assertEqual(result['machine_id'], 'cnc_machine_006')
+            self.assertEqual(result['train_samples'], 35000)
+            self.assertEqual(result['val_samples'], 7500)
+            self.assertEqual(result['test_samples'], 7500)
+            self.assertEqual(result['train_file'], '/data/train.csv')
+
+            # Verify GANManager was called
+            mock_manager.generate_synthetic_data.assert_called_once_with(
+                machine_id='cnc_machine_006',
+                train_samples=35000,
+                val_samples=7500,
+                test_samples=7500
+            )
     
     @patch('tasks.gan_tasks.gan_manager')
     @patch('tasks.gan_tasks.broadcast_progress')
@@ -245,23 +224,19 @@ class TestGenerateDataTask(unittest.TestCase):
         """Test generation with missing model"""
         mock_manager.generate_synthetic_data.side_effect = FileNotFoundError("Model not found")
         
-        mock_request = Mock(id='gen-task-002')
-        with patch.object(generate_data_task, 'request', new_callable=PropertyMock) as mock_req:
-            mock_req.return_value = mock_request
-            with patch.object(generate_data_task, 'update_state'):
-                
-                with self.assertRaises(FileNotFoundError):
-                    generate_data_task.run(
-                        'cnc_machine_007',
-                        train_samples=1000,
-                        val_samples=200,
-                        test_samples=200
-                    )
-                
-                # Verify failure broadcast
-                failure_calls = [call for call in mock_broadcast.call_args_list 
-                                if 'FAILURE' in str(call)]
-                self.assertGreater(len(failure_calls), 0)
+        with patch.object(generate_data_task, 'update_state'):
+            with self.assertRaises(FileNotFoundError):
+                generate_data_task.run(
+                    'cnc_machine_007',
+                    train_samples=1000,
+                    val_samples=200,
+                    test_samples=200
+                )
+
+            # Verify failure broadcast
+            failure_calls = [call for call in mock_broadcast.call_args_list 
+                            if 'FAILURE' in str(call)]
+            self.assertGreater(len(failure_calls), 0)
 
 
 class TestGenerateSeedDataTask(unittest.TestCase):
@@ -280,37 +255,29 @@ class TestGenerateSeedDataTask(unittest.TestCase):
         )
         mock_manager.generate_seed_data.return_value = mock_result
         
-        mock_request = Mock(id='seed-task-001')
-        with patch.object(generate_seed_data_task, 'request', new_callable=PropertyMock) as mock_req:
-            mock_req.return_value = mock_request
-            
-            # Execute task
-            result = generate_seed_data_task.run('cnc_machine_008', samples=10000)
-            
-            # Verify result
-            self.assertTrue(result['success'])
-            self.assertEqual(result['machine_id'], 'cnc_machine_008')
-            self.assertEqual(result['samples_generated'], 10000)
-            self.assertEqual(result['file_path'], '/seed_data/cnc_machine_008_seed.csv')
-            self.assertEqual(result['file_size_mb'], 2.5)
-            
-            # Verify GANManager was called
-            mock_manager.generate_seed_data.assert_called_once_with(
-                machine_id='cnc_machine_008',
-                samples=10000
-            )
+        # Execute task
+        result = generate_seed_data_task.run('cnc_machine_008', samples=10000)
+
+        # Verify result
+        self.assertTrue(result['success'])
+        self.assertEqual(result['machine_id'], 'cnc_machine_008')
+        self.assertEqual(result['samples_generated'], 10000)
+        self.assertEqual(result['file_path'], '/seed_data/cnc_machine_008_seed.csv')
+        self.assertEqual(result['file_size_mb'], 2.5)
+
+        # Verify GANManager was called
+        mock_manager.generate_seed_data.assert_called_once_with(
+            machine_id='cnc_machine_008',
+            samples=10000
+        )
     
     @patch('tasks.gan_tasks.gan_manager')
     def test_generate_seed_machine_not_found(self, mock_manager):
         """Test seed generation with invalid machine"""
         mock_manager.generate_seed_data.side_effect = FileNotFoundError("Machine not found")
         
-        mock_request = Mock(id='seed-task-002')
-        with patch.object(generate_seed_data_task, 'request', new_callable=PropertyMock) as mock_req:
-            mock_req.return_value = mock_request
-            
-            with self.assertRaises(FileNotFoundError):
-                generate_seed_data_task.run('invalid_machine', samples=5000)
+        with self.assertRaises(FileNotFoundError):
+            generate_seed_data_task.run('invalid_machine', samples=5000)
 
 
 class TestGetTaskStatus(unittest.TestCase):
@@ -378,13 +345,10 @@ class TestEndToEndWorkflow(unittest.TestCase):
             timestamp='2024-01-15T10:00:00'
         )
         
-        mock_req_seed = Mock(id='seed-task')
-        with patch.object(generate_seed_data_task, 'request', new_callable=PropertyMock) as mock_req:
-            mock_req.return_value = mock_req_seed
-            seed_result = generate_seed_data_task.run(machine_id, samples=10000)
-            
-            self.assertTrue(seed_result['success'])
-            self.assertEqual(seed_result['samples_generated'], 10000)
+        seed_result = generate_seed_data_task.run(machine_id, samples=10000)
+
+        self.assertTrue(seed_result['success'])
+        self.assertEqual(seed_result['samples_generated'], 10000)
         
         # Step 2: Train model
         mock_manager.train_tvae_model.return_value = Mock(
@@ -394,14 +358,11 @@ class TestEndToEndWorkflow(unittest.TestCase):
             num_features=20
         )
         
-        mock_req_train = Mock(id='train-task')
-        with patch.object(train_tvae_task, 'request', new_callable=PropertyMock) as mock_req:
-            mock_req.return_value = mock_req_train
-            with patch.object(train_tvae_task, 'update_state'):
-                train_result = train_tvae_task.run(machine_id, epochs=100)
-                
-                self.assertTrue(train_result['success'])
-                self.assertEqual(train_result['final_loss'], 0.05)
+        with patch.object(train_tvae_task, 'update_state'):
+            train_result = train_tvae_task.run(machine_id, epochs=100)
+
+            self.assertTrue(train_result['success'])
+            self.assertEqual(train_result['final_loss'], 0.05)
         
         # Step 3: Generate synthetic data
         mock_manager.generate_synthetic_data.return_value = Mock(
@@ -414,14 +375,11 @@ class TestEndToEndWorkflow(unittest.TestCase):
             timestamp='2024-01-15T10:30:00'
         )
         
-        mock_req_gen = Mock(id='gen-task')
-        with patch.object(generate_data_task, 'request', new_callable=PropertyMock) as mock_req:
-            mock_req.return_value = mock_req_gen
-            with patch.object(generate_data_task, 'update_state'):
-                gen_result = generate_data_task.run(machine_id, 35000, 7500, 7500)
-                
-                self.assertTrue(gen_result['success'])
-                self.assertEqual(gen_result['train_samples'], 35000)
+        with patch.object(generate_data_task, 'update_state'):
+            gen_result = generate_data_task.run(machine_id, 35000, 7500, 7500)
+
+            self.assertTrue(gen_result['success'])
+            self.assertEqual(gen_result['train_samples'], 35000)
         
         # Verify all GANManager methods called
         mock_manager.generate_seed_data.assert_called_once()

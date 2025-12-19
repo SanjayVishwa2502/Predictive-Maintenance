@@ -1,0 +1,589 @@
+/**
+ * SensorCharts Component
+ * 
+ * Multi-line time-series chart for sensor data visualization
+ * Features:
+ * - Real-time data streaming (5-second intervals)
+ * - Multi-sensor selection (max 5 concurrent)
+ * - Auto-scroll as new data arrives
+ * - Zoom and pan capabilities
+ * - Threshold indicators (warning/critical)
+ * - CSV export functionality
+ * - Responsive design
+ * 
+ * Design: Professional dark theme with color-coded sensor categories
+ */
+
+import { useState, useMemo, useRef, useEffect } from 'react';
+import {
+  Box,
+  Card,
+  CardContent,
+  CardHeader,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Chip,
+  Button,
+  Stack,
+  Typography,
+  IconButton,
+  Tooltip,
+  Divider,
+} from '@mui/material';
+import type { SelectChangeEvent } from '@mui/material';
+import {
+  Download as DownloadIcon,
+  ZoomIn as ZoomInIcon,
+  ZoomOut as ZoomOutIcon,
+  RestartAlt as RestartAltIcon,
+  PlayArrow as PlayArrowIcon,
+  Pause as PauseIcon,
+} from '@mui/icons-material';
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip,
+  Legend,
+  ResponsiveContainer,
+  ReferenceLine,
+} from 'recharts';
+
+// ============================================================================
+// TYPESCRIPT INTERFACES
+// ============================================================================
+
+export interface SensorChartsProps {
+  machineId: string;
+  sensorHistory: SensorReading[];
+  availableSensors: string[];
+  selectedSensors?: string[];
+  onSensorToggle?: (sensor: string) => void;
+  autoScroll?: boolean;
+  maxDataPoints?: number;
+}
+
+export interface SensorReading {
+  timestamp: Date;
+  values: Record<string, number>;
+}
+
+interface SensorThreshold {
+  warning: number;
+  critical: number;
+}
+
+// ============================================================================
+// SENSOR CATEGORIZATION & COLORS
+// ============================================================================
+
+const getSensorCategory = (sensorName: string): string => {
+  const lower = sensorName.toLowerCase();
+  if (lower.includes('temp') || lower.includes('temperature')) return 'temperature';
+  if (lower.includes('vibr') || lower.includes('velocity')) return 'vibration';
+  if (lower.includes('current') || lower.includes('amp')) return 'current';
+  if (lower.includes('voltage') || lower.includes('volt')) return 'voltage';
+  if (lower.includes('pressure') || lower.includes('psi')) return 'pressure';
+  if (lower.includes('speed') || lower.includes('rpm')) return 'speed';
+  return 'other';
+};
+
+const getCategoryColor = (category: string): string => {
+  const colors: Record<string, string> = {
+    temperature: '#ef4444', // Red
+    vibration: '#3b82f6',   // Blue
+    current: '#a855f7',     // Purple
+    voltage: '#10b981',     // Green
+    pressure: '#06b6d4',    // Cyan
+    speed: '#f59e0b',       // Orange
+    other: '#6b7280',       // Gray
+  };
+  return colors[category] || colors.other;
+};
+
+const getSensorColor = (sensorName: string): string => {
+  const category = getSensorCategory(sensorName);
+  return getCategoryColor(category);
+};
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+const formatSensorName = (name: string): string => {
+  return name
+    .split('_')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+};
+
+const formatTimestamp = (timestamp: Date): string => {
+  return new Intl.DateTimeFormat('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(timestamp);
+};
+
+const getDefaultThreshold = (sensorName: string): SensorThreshold | null => {
+  const lower = sensorName.toLowerCase();
+  
+  if (lower.includes('temp')) {
+    return { warning: 70, critical: 85 };
+  }
+  if (lower.includes('vibr') || lower.includes('velocity')) {
+    return { warning: 5, critical: 8 };
+  }
+  if (lower.includes('current')) {
+    return { warning: 15, critical: 20 };
+  }
+  if (lower.includes('pressure')) {
+    return { warning: 100, critical: 120 };
+  }
+  
+  return null;
+};
+
+const exportToCSV = (data: SensorReading[], sensors: string[], machineId: string) => {
+  const headers = ['Timestamp', ...sensors.map(s => formatSensorName(s))];
+  const rows = data.map(reading => [
+    reading.timestamp.toISOString(),
+    ...sensors.map(sensor => reading.values[sensor]?.toFixed(2) || ''),
+  ]);
+  
+  const csv = [
+    headers.join(','),
+    ...rows.map(row => row.join(',')),
+  ].join('\n');
+  
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${machineId}_sensor_data_${Date.now()}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+};
+
+// ============================================================================
+// MAIN COMPONENT
+// ============================================================================
+
+export default function SensorCharts({
+  machineId,
+  sensorHistory,
+  availableSensors,
+  selectedSensors: externalSelectedSensors,
+  onSensorToggle,
+  autoScroll = true,
+  maxDataPoints = 120,
+}: SensorChartsProps) {
+  const [internalSelectedSensors, setInternalSelectedSensors] = useState<string[]>(
+    availableSensors.slice(0, 3)
+  );
+  const [isPaused, setIsPaused] = useState(false);
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+
+  // Use external or internal sensor selection
+  const selectedSensors = externalSelectedSensors || internalSelectedSensors;
+
+  // Handle sensor selection change
+  const handleSensorChange = (event: SelectChangeEvent<string[]>) => {
+    const value = event.target.value as string[];
+    
+    // Limit to 5 sensors max
+    if (value.length > 5) return;
+    
+    if (onSensorToggle) {
+      // External control
+      value.forEach(sensor => onSensorToggle(sensor));
+    } else {
+      // Internal control
+      setInternalSelectedSensors(value);
+    }
+  };
+
+  // Prepare chart data (limit to maxDataPoints)
+  const chartData = useMemo(() => {
+    const limited = sensorHistory.slice(-maxDataPoints);
+    return limited.map(reading => ({
+      time: formatTimestamp(reading.timestamp),
+      timestamp: reading.timestamp.getTime(),
+      ...reading.values,
+    }));
+  }, [sensorHistory, maxDataPoints]);
+
+  // Get min/max values for Y-axis domain
+  const getYAxisDomain = useMemo(() => {
+    if (chartData.length === 0 || selectedSensors.length === 0) {
+      return [0, 100];
+    }
+
+    let min = Infinity;
+    let max = -Infinity;
+
+    chartData.forEach(point => {
+      selectedSensors.forEach(sensor => {
+        const value = (point as Record<string, unknown>)[sensor] as number;
+        if (typeof value === 'number' && !isNaN(value)) {
+          min = Math.min(min, value);
+          max = Math.max(max, value);
+        }
+      });
+    });
+
+    // Add 10% padding
+    const padding = (max - min) * 0.1;
+    return [Math.floor(min - padding), Math.ceil(max + padding)];
+  }, [chartData, selectedSensors]);
+
+  // Handle zoom
+  const handleZoomIn = () => {
+    setZoomLevel(prev => Math.min(prev * 1.5, 5));
+  };
+
+  const handleZoomOut = () => {
+    setZoomLevel(prev => Math.max(prev / 1.5, 1));
+  };
+
+  const handleResetZoom = () => {
+    setZoomLevel(1);
+  };
+
+  // Handle CSV export
+  const handleExport = () => {
+    exportToCSV(sensorHistory, selectedSensors, machineId);
+  };
+
+  // Auto-scroll to end when new data arrives
+  useEffect(() => {
+    if (autoScroll && !isPaused && chartContainerRef.current) {
+      chartContainerRef.current.scrollLeft = chartContainerRef.current.scrollWidth;
+    }
+  }, [chartData, autoScroll, isPaused]);
+
+  // ============================================================================
+  // RENDER
+  // ============================================================================
+
+  return (
+    <Card
+      sx={{
+        background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.8) 0%, rgba(17, 24, 39, 0.8) 100%)',
+        backdropFilter: 'blur(10px)',
+        border: '1px solid rgba(255, 255, 255, 0.1)',
+        borderRadius: 2,
+      }}
+    >
+      {/* HEADER */}
+      <CardHeader
+        title={
+          <Typography variant="h6" sx={{ fontWeight: 600, color: '#f9fafb' }}>
+            SENSOR TREND ANALYSIS
+          </Typography>
+        }
+        subheader={
+          <Typography variant="body2" sx={{ color: '#9ca3af', mt: 0.5 }}>
+            Last {Math.floor(maxDataPoints * 5 / 60)} minutes • {chartData.length} data points
+          </Typography>
+        }
+      />
+      <Divider sx={{ borderColor: 'rgba(255, 255, 255, 0.1)' }} />
+
+      <CardContent>
+        {/* SENSOR SELECTION */}
+        <FormControl
+          fullWidth
+          sx={{
+            mb: 3,
+            '& .MuiOutlinedInput-root': {
+              bgcolor: 'rgba(31, 41, 55, 0.5)',
+              '& fieldset': { borderColor: 'rgba(255, 255, 255, 0.2)' },
+              '&:hover fieldset': { borderColor: 'rgba(255, 255, 255, 0.3)' },
+            },
+            '& .MuiInputLabel-root': { color: '#d1d5db' },
+          }}
+        >
+          <InputLabel>Select Sensors (Max 5)</InputLabel>
+          <Select
+            multiple
+            value={selectedSensors}
+            onChange={handleSensorChange}
+            label="Select Sensors (Max 5)"
+            renderValue={(selected) => (
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                {selected.map((value) => (
+                  <Chip
+                    key={value}
+                    label={formatSensorName(value)}
+                    size="small"
+                    sx={{
+                      bgcolor: `${getSensorColor(value)}20`,
+                      color: getSensorColor(value),
+                      borderColor: getSensorColor(value),
+                      border: '1px solid',
+                    }}
+                  />
+                ))}
+              </Box>
+            )}
+          >
+            {availableSensors.map((sensor) => (
+              <MenuItem
+                key={sensor}
+                value={sensor}
+                disabled={
+                  !selectedSensors.includes(sensor) && selectedSensors.length >= 5
+                }
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Box
+                    sx={{
+                      width: 12,
+                      height: 12,
+                      borderRadius: '50%',
+                      bgcolor: getSensorColor(sensor),
+                    }}
+                  />
+                  {formatSensorName(sensor)}
+                </Box>
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+
+        {/* CHART CONTROLS */}
+        <Stack
+          direction="row"
+          spacing={2}
+          sx={{ mb: 2 }}
+          flexWrap="wrap"
+        >
+          <Tooltip title="Zoom In">
+            <IconButton
+              size="small"
+              onClick={handleZoomIn}
+              disabled={zoomLevel >= 5}
+              sx={{
+                color: '#667eea',
+                '&:hover': { bgcolor: 'rgba(102, 126, 234, 0.1)' },
+              }}
+            >
+              <ZoomInIcon />
+            </IconButton>
+          </Tooltip>
+
+          <Tooltip title="Zoom Out">
+            <IconButton
+              size="small"
+              onClick={handleZoomOut}
+              disabled={zoomLevel <= 1}
+              sx={{
+                color: '#667eea',
+                '&:hover': { bgcolor: 'rgba(102, 126, 234, 0.1)' },
+              }}
+            >
+              <ZoomOutIcon />
+            </IconButton>
+          </Tooltip>
+
+          <Tooltip title="Reset Zoom">
+            <IconButton
+              size="small"
+              onClick={handleResetZoom}
+              disabled={zoomLevel === 1}
+              sx={{
+                color: '#667eea',
+                '&:hover': { bgcolor: 'rgba(102, 126, 234, 0.1)' },
+              }}
+            >
+              <RestartAltIcon />
+            </IconButton>
+          </Tooltip>
+
+          <Tooltip title={isPaused ? 'Resume Auto-scroll' : 'Pause Auto-scroll'}>
+            <IconButton
+              size="small"
+              onClick={() => setIsPaused(!isPaused)}
+              sx={{
+                color: isPaused ? '#f97316' : '#10b981',
+                '&:hover': {
+                  bgcolor: isPaused ? 'rgba(249, 115, 22, 0.1)' : 'rgba(16, 185, 129, 0.1)',
+                },
+              }}
+            >
+              {isPaused ? <PlayArrowIcon /> : <PauseIcon />}
+            </IconButton>
+          </Tooltip>
+
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<DownloadIcon />}
+            onClick={handleExport}
+            disabled={chartData.length === 0 || selectedSensors.length === 0}
+            sx={{
+              borderColor: '#667eea',
+              color: '#667eea',
+              '&:hover': {
+                borderColor: '#5568d3',
+                bgcolor: 'rgba(102, 126, 234, 0.1)',
+              },
+            }}
+          >
+            Export CSV
+          </Button>
+
+          <Chip
+            label={`Zoom: ${(zoomLevel * 100).toFixed(0)}%`}
+            size="small"
+            sx={{
+              bgcolor: 'rgba(102, 126, 234, 0.2)',
+              color: '#667eea',
+            }}
+          />
+        </Stack>
+
+        {/* CHART */}
+        <Box
+          ref={chartContainerRef}
+          sx={{
+            width: '100%',
+            height: 400,
+            overflowX: autoScroll ? 'hidden' : 'auto',
+            overflowY: 'hidden',
+          }}
+        >
+          <ResponsiveContainer width={`${100 * zoomLevel}%`} height="100%">
+            <LineChart
+              data={chartData}
+              margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.1)" />
+              
+              <XAxis
+                dataKey="time"
+                stroke="#9ca3af"
+                style={{ fontSize: 12 }}
+              />
+              
+              <YAxis
+                stroke="#9ca3af"
+                style={{ fontSize: 12 }}
+                domain={getYAxisDomain}
+              />
+              
+              <RechartsTooltip
+                contentStyle={{
+                  backgroundColor: 'rgba(17, 24, 39, 0.95)',
+                  border: '1px solid rgba(255, 255, 255, 0.2)',
+                  borderRadius: 8,
+                  color: '#f9fafb',
+                }}
+                labelStyle={{ color: '#d1d5db', marginBottom: 8 }}
+              />
+              
+              <Legend
+                wrapperStyle={{ color: '#d1d5db' }}
+                formatter={(value) => formatSensorName(value)}
+              />
+
+              {/* Threshold lines for first selected sensor */}
+              {selectedSensors.length > 0 && (() => {
+                const firstSensor = selectedSensors[0];
+                const threshold = getDefaultThreshold(firstSensor);
+                return threshold ? (
+                  <>
+                    <ReferenceLine
+                      y={threshold.warning}
+                      stroke="#fbbf24"
+                      strokeDasharray="5 5"
+                      label={{
+                        value: 'Warning',
+                        fill: '#fbbf24',
+                        fontSize: 11,
+                      }}
+                    />
+                    <ReferenceLine
+                      y={threshold.critical}
+                      stroke="#ef4444"
+                      strokeDasharray="5 5"
+                      label={{
+                        value: 'Critical',
+                        fill: '#ef4444',
+                        fontSize: 11,
+                      }}
+                    />
+                  </>
+                ) : null;
+              })()}
+
+              {/* Lines for each selected sensor */}
+              {selectedSensors.map((sensor) => (
+                <Line
+                  key={sensor}
+                  type="monotone"
+                  dataKey={sensor}
+                  name={formatSensorName(sensor)}
+                  stroke={getSensorColor(sensor)}
+                  strokeWidth={2}
+                  dot={false}
+                  activeDot={{ r: 6 }}
+                  animationDuration={300}
+                />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        </Box>
+
+        {/* EMPTY STATE */}
+        {chartData.length === 0 && (
+          <Box
+            sx={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              py: 8,
+              gap: 2,
+            }}
+          >
+            <Typography variant="h6" sx={{ color: '#9ca3af' }}>
+              No sensor data available
+            </Typography>
+            <Typography variant="body2" sx={{ color: '#6b7280' }}>
+              Waiting for sensor readings...
+            </Typography>
+          </Box>
+        )}
+
+        {/* NO SENSORS SELECTED */}
+        {chartData.length > 0 && selectedSensors.length === 0 && (
+          <Box
+            sx={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              py: 8,
+              gap: 2,
+            }}
+          >
+            <Typography variant="h6" sx={{ color: '#9ca3af' }}>
+              No sensors selected
+            </Typography>
+            <Typography variant="body2" sx={{ color: '#6b7280' }}>
+              Select up to 5 sensors from the dropdown above
+            </Typography>
+          </Box>
+        )}
+      </CardContent>
+    </Card>
+  );
+}

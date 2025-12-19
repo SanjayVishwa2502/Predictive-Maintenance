@@ -1,0 +1,48 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - heading "Machine Health Dashboard" [level=3] [ref=e6]
+      - generic [ref=e7]:
+        - generic [ref=e8]:
+          - img [ref=e9]
+          - generic [ref=e11]: Online
+        - generic [ref=e12]:
+          - img [ref=e13]
+          - generic [ref=e15]: Connected
+    - paragraph [ref=e16]: Real-time monitoring and predictive maintenance for industrial equipment
+  - generic [ref=e19]:
+    - generic [ref=e20]:
+      - generic [ref=e21]: Select Machine
+      - generic [ref=e22]:
+        - img [ref=e24]
+        - combobox "Select Machine" [expanded] [active] [ref=e26]: M
+        - button "Close" [ref=e28] [cursor=pointer]:
+          - img [ref=e29]
+        - group:
+          - generic: Select Machine
+    - listbox "Select Machine" [ref=e31]:
+      - listitem [ref=e32]:
+        - generic [ref=e33]: Motor
+        - list [ref=e34]:
+          - option "🔧 Motor SIEMENS 001 10 sensors 1 trained model SIEMENS | MODEL_001 Classification Model" [ref=e35] [cursor=pointer]:
+            - generic [ref=e36]:
+              - heading "🔧" [level=6] [ref=e37]
+              - paragraph [ref=e38]: Motor SIEMENS 001
+              - generic [ref=e39]:
+                - img [ref=e40]
+                - generic [ref=e42]: 10 sensors
+              - generic "1 trained model" [ref=e43]:
+                - img [ref=e44]
+                - generic [ref=e46]: Trained
+            - generic [ref=e47]:
+              - generic [ref=e48]: SIEMENS
+              - generic [ref=e49]: "|"
+              - generic [ref=e50]: MODEL_001
+              - generic "Classification Model" [ref=e52]
+  - generic [ref=e53]:
+    - heading "Select a Machine to Begin Monitoring" [level=5] [ref=e54]
+    - paragraph [ref=e55]: Choose a machine from the dropdown above to view real-time sensor data, run predictions, and monitor health status
+```

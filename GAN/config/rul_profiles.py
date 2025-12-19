@@ -264,6 +264,40 @@ RUL_PROFILES = {
             'pressure': 0.85                 # Very High: Compression ratio drops
         }
     }
+
+    # =========================================================================
+    # CATEGORY 12: CHILLERS (dashboard-created machines)
+    # Medium-long life with steady degradation
+    # Primary failure: compressor wear, refrigerant issues, heat exchanger fouling
+    #
+    # NOTE: New chiller machine_ids are created via the dashboard and should not
+    # require a manual entry in this file. Category inference below covers them.
+    # =========================================================================
+    ,
+    'chiller': {
+        'machines': [],
+        'max_rul': 1200,
+        'cycles_per_dataset': 3,
+        'degradation_pattern': 'linear_medium',
+        'noise_std': 18,
+        'sensor_correlation': {
+            'temperature': 0.85,
+            'pressure': 0.80,
+            'vibration': 0.70,
+            'flow': 0.75
+        }
+    }
+}
+
+
+# Generic fallback profile used when a machine type is unknown.
+DEFAULT_RUL_PROFILE = {
+    'machines': [],
+    'max_rul': 1000,
+    'cycles_per_dataset': 3,
+    'degradation_pattern': 'linear_medium',
+    'noise_std': 15,
+    'sensor_correlation': {}
 }
 
 # =========================================================================
@@ -282,14 +316,44 @@ def get_machine_category(machine_id):
     for category, profile in RUL_PROFILES.items():
         if machine_id in profile['machines']:
             return category
-    return None
+
+    # If the machine_id isn't explicitly listed, infer category from its prefix.
+    # This supports dashboard-created machines without requiring manual config edits.
+    try:
+        parts = [p for p in str(machine_id).split('_') if p]
+    except Exception:
+        parts = []
+
+    if not parts:
+        return None
+
+    # Handle multi-word machine types
+    multiword_prefixes = {
+        'cooling_tower',
+        'induction_motor',
+    }
+
+    prefix = None
+    if len(parts) >= 2 and f"{parts[0]}_{parts[1]}" in multiword_prefixes:
+        prefix = f"{parts[0]}_{parts[1]}"
+    else:
+        prefix = parts[0]
+
+    # Map prefixes to known categories when they differ
+    prefix_to_category = {
+        'induction_motor': 'motor',
+    }
+    inferred = prefix_to_category.get(prefix, prefix)
+
+    # Only return inferred categories we actually have a profile for.
+    return inferred if inferred in RUL_PROFILES else None
 
 def get_rul_profile(machine_id):
     """Get RUL profile for a specific machine"""
     category = get_machine_category(machine_id)
     if category:
         return RUL_PROFILES[category]
-    return None
+    return DEFAULT_RUL_PROFILE
 
 def validate_all_machines_covered():
     """Validate that all 26 machines have RUL profiles"""

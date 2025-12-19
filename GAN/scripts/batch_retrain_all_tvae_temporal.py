@@ -21,8 +21,8 @@ from datetime import datetime, timedelta
 
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
-from config.rul_profiles import RUL_PROFILES
-from config.tvae_config import TVAE_CONFIG
+from GAN.config.rul_profiles import RUL_PROFILES
+from GAN.config.tvae_config import TVAE_CONFIG
 from scripts.retrain_tvae_temporal import retrain_machine_tvae_temporal
 
 

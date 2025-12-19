@@ -294,7 +294,12 @@ class GANManagerWrapper:
                 'can_generate_data': bool
             }
         """
-        metadata_exists = (self.gan_manager.metadata_path / f"{machine_id}_metadata.json").exists()
+        # Historical naming: the GAN manager writes a derived *metadata* file as
+        # `{machine_id}_metadata.json`. The dashboard also stores the authored
+        # profile as `{machine_id}.json`. Treat either as sufficient to consider
+        # the machine "configured" for the next step.
+        derived_metadata_exists = (self.gan_manager.metadata_path / f"{machine_id}_metadata.json").exists()
+        profile_exists = (self.gan_manager.metadata_path / f"{machine_id}.json").exists()
         seed_exists = self.validate_seed_data_exists(machine_id)
         model_exists = self.validate_model_exists(machine_id)
         
@@ -304,15 +309,17 @@ class GANManagerWrapper:
             synthetic_dir.exists() and
             (synthetic_dir / "train.parquet").exists()
         )
+
+        has_profile_or_metadata = bool(derived_metadata_exists or profile_exists)
         
         return {
-            'has_metadata': metadata_exists,
+            'has_metadata': has_profile_or_metadata,
             'has_seed_data': seed_exists,
             'has_trained_model': model_exists,
             'has_synthetic_data': synthetic_exists,
-            'can_generate_seed': metadata_exists,
-            'can_train_model': metadata_exists and seed_exists,
-            'can_generate_data': metadata_exists and model_exists
+            'can_generate_seed': has_profile_or_metadata,
+            'can_train_model': has_profile_or_metadata and seed_exists,
+            'can_generate_data': has_profile_or_metadata and model_exists
         }
     
     def get_machine_details(self, machine_id: str) -> Dict[str, Any]:

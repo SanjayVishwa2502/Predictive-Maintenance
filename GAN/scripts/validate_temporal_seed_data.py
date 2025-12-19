@@ -29,7 +29,7 @@ warnings.filterwarnings('ignore')
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from config.rul_profiles import get_rul_profile, RUL_PROFILES
+from GAN.config.rul_profiles import get_rul_profile, RUL_PROFILES
 
 
 def check_rul_sequence(df, machine_id):

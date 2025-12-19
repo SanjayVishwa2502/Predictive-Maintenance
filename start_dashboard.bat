@@ -6,14 +6,16 @@ echo.
 
 REM Start Backend (FastAPI)
 echo [1/3] Starting Backend Server...
-start "Backend - FastAPI" powershell -NoExit -Command "cd 'C:\Projects\Predictive Maintenance\frontend\server'; & 'C:\Projects\Predictive Maintenance\venv\Scripts\Activate.ps1'; Write-Host '=== BACKEND SERVER ===' -ForegroundColor Green; uvicorn main:app --reload --host 0.0.0.0 --port 8000"
+start "Backend - FastAPI" powershell -NoExit -Command "cd 'C:\Projects\Predictive Maintenance\frontend\server'; & 'C:\Projects\Predictive Maintenance\venv\Scripts\Activate.ps1'; Write-Host '=== BACKEND SERVER ===' -ForegroundColor Green; uvicorn main:app --host 0.0.0.0 --port 8000"
 
 REM Wait 3 seconds
 timeout /t 3 /nobreak >nul
 
 REM Start Celery Worker
 echo [2/3] Starting Celery Worker...
-start "Celery Worker" powershell -NoExit -Command "cd 'C:\Projects\Predictive Maintenance\frontend\server'; & 'C:\Projects\Predictive Maintenance\venv\Scripts\Activate.ps1'; Write-Host '=== CELERY WORKER ===' -ForegroundColor Yellow; celery -A celery_app worker --loglevel=info --pool=solo"
+REM NOTE: Celery uses Redis as a broker; pending tasks from earlier runs may execute when the worker starts.
+REM Set PM_CELERY_PURGE_ON_START=1 to discard pending tasks on startup.
+start "Celery Worker" powershell -NoExit -Command "cd 'C:\Projects\Predictive Maintenance\frontend\server'; & 'C:\Projects\Predictive Maintenance\venv\Scripts\Activate.ps1'; Write-Host '=== CELERY WORKER ===' -ForegroundColor Yellow; if ($env:PM_CELERY_PURGE_ON_START -eq '1') { Write-Host '=== CELERY PURGE (discarding pending tasks) ===' -ForegroundColor Yellow; celery -A celery_app purge -Q celery,gan -f }; celery -A celery_app worker --loglevel=info --pool=solo"
 
 REM Wait 3 seconds
 timeout /t 3 /nobreak >nul

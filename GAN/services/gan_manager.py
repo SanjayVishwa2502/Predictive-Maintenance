@@ -165,7 +165,7 @@ class GANManager:
         self.synthetic_generations = 0
         self.model_trainings = 0
         
-        logger.info(f"✅ GAN Manager initialized successfully")
+        logger.info(f"[OK] GAN Manager initialized successfully")
         logger.info(f"   Models path: {self.models_path}")
         logger.info(f"   Seed data path: {self.seed_data_path}")
         logger.info(f"   Synthetic data path: {self.synthetic_data_path}")
@@ -194,7 +194,7 @@ class GANManager:
         try:
             import joblib
             model = joblib.load(model_path)
-            logger.info(f"✅ TVAE model loaded for {machine_id}")
+            logger.info(f"[OK] TVAE model loaded for {machine_id}")
             return model
         except Exception as e:
             logger.error(f"Failed to load TVAE model: {e}")
@@ -266,7 +266,7 @@ class GANManager:
                 timestamp=datetime.utcnow().isoformat() + "Z"
             )
             
-            logger.info(f"✅ Seed data generated: {file_size_mb:.2f} MB in {generation_time:.2f}s")
+            logger.info(f"[OK] Seed data generated: {file_size_mb:.2f} MB in {generation_time:.2f}s")
             return result
             
         except Exception as e:
@@ -347,7 +347,7 @@ class GANManager:
                 num_features=train_results.get('features', 0)
             )
             
-            logger.info(f"✅ TVAE trained in {training_time:.2f}s, Quality: {train_results.get('quality_score')}")
+            logger.info(f"[OK] TVAE trained in {training_time:.2f}s, Quality: {train_results.get('quality_score')}")
             return result
             
         except Exception as e:
@@ -434,7 +434,7 @@ class GANManager:
                 timestamp=gen_results.get('timestamp')
             )
             
-            logger.info(f"✅ Synthetic data generated: {total_samples} samples in {generation_time:.2f}s")
+            logger.info(f"[OK] Synthetic data generated: {total_samples} samples in {generation_time:.2f}s")
             return result
             
         except Exception as e:

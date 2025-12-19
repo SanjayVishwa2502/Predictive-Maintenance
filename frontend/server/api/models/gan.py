@@ -239,6 +239,21 @@ class ValidationIssue(BaseModel):
     message: str
 
 
+class InlineProfileValidationRequest(BaseModel):
+    """Validate a profile JSON payload without staging it on disk."""
+    profile_data: Dict[str, Any] = Field(..., description="Machine profile JSON payload")
+    strict: bool = Field(default=True, description="Strict validation (duplicates, TVAE rules)")
+
+
+class InlineProfileValidationResponse(BaseModel):
+    """Inline validation result."""
+    valid: bool
+    machine_id: str
+    issues: List[ValidationIssue] = []
+    can_proceed: bool
+    message: str
+
+
 class ProfileValidationResponse(BaseModel):
     """Profile validation response"""
     valid: bool
@@ -503,6 +518,7 @@ class MachineListResponse(BaseModel):
     """List of machines"""
     total: int
     machines: List[str]
+    machine_details: Optional[List[MachineDetails]] = None
     
     class Config:
         json_schema_extra = {
@@ -512,6 +528,30 @@ class MachineListResponse(BaseModel):
                     "motor_siemens_1la7_001",
                     "pump_grundfos_cr3_004",
                     "cnc_dmg_nlx_010"
+                ],
+                "machine_details": [
+                    {
+                        "machine_id": "motor_siemens_1la7_001",
+                        "machine_type": "motor",
+                        "manufacturer": "Siemens",
+                        "model": "1LA7 090-4AA60",
+                        "num_sensors": 8,
+                        "degradation_states": 4,
+                        "status": {
+                            "machine_id": "motor_siemens_1la7_001",
+                            "status": "trained",
+                            "has_metadata": True,
+                            "has_seed_data": True,
+                            "has_trained_model": True,
+                            "has_synthetic_data": False,
+                            "can_generate_seed": True,
+                            "can_train_model": True,
+                            "can_generate_synthetic": True,
+                            "last_updated": "2024-12-15T16:00:00Z"
+                        },
+                        "created_at": "2024-12-10T10:00:00Z",
+                        "updated_at": "2024-12-15T16:00:00Z"
+                    }
                 ]
             }
         }
@@ -540,6 +580,7 @@ class TaskStatusResponse(BaseModel):
     progress: Optional[TaskProgress] = None
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+    logs: Optional[str] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     

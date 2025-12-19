@@ -19,7 +19,7 @@ from sdv.evaluation.single_table import evaluate_quality
 
 # Add parent directory to path for config import
 sys.path.append(str(Path(__file__).parent.parent))
-from config.tvae_config import TVAE_CONFIG
+from GAN.config.tvae_config import TVAE_CONFIG
 
 
 def train_machine_tvae(machine_id, config, test_mode=False):

@@ -20,9 +20,11 @@ import json
 import sys
 import time
 
-# Add config to path
-sys.path.append(str(Path(__file__).parent.parent))
-from config.rul_profiles import RUL_PROFILES, get_machine_category, get_rul_profile
+# Ensure project root is importable so `GAN.*` namespace imports work reliably
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from GAN.config.rul_profiles import RUL_PROFILES, get_machine_category, get_rul_profile
 
 
 def create_temporal_seed_data(machine_id, rul_profile, n_samples=50000):
@@ -409,11 +411,11 @@ if __name__ == "__main__":
         machine_id = sys.argv[1]
         
         # Reload rul_profiles to pick up any recent changes
-        from config import rul_profiles as rul_profiles_module
+        from GAN.config import rul_profiles as rul_profiles_module
         importlib.reload(rul_profiles_module)
-        from config.rul_profiles import RUL_PROFILES as FRESH_RUL_PROFILES
-        from config.rul_profiles import get_machine_category as fresh_get_machine_category
-        from config.rul_profiles import get_rul_profile as fresh_get_rul_profile
+        from GAN.config.rul_profiles import RUL_PROFILES as FRESH_RUL_PROFILES
+        from GAN.config.rul_profiles import get_machine_category as fresh_get_machine_category
+        from GAN.config.rul_profiles import get_rul_profile as fresh_get_rul_profile
         
         # Use fresh imports for single machine mode
         category = fresh_get_machine_category(machine_id)

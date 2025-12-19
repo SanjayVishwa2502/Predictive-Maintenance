@@ -9,7 +9,13 @@ Celery is used for:
 - Data preprocessing pipelines
 """
 import logging
+import sys
+from pathlib import Path
 from celery import Celery
+
+# Add project root to path for imports (keeps GAN namespace imports reliable)
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from config import settings
 
@@ -66,6 +72,7 @@ celery_app.conf.update(
 # Manually import tasks to ensure they're registered
 # Auto-discovery doesn't work reliably on Windows
 import tasks.test_task  # noqa
+import tasks.gan_tasks  # noqa
 
 logger.info(f"Celery app configured with broker: {settings.CELERY_BROKER_URL}")
 logger.info(f"Result backend: {settings.CELERY_RESULT_BACKEND}")

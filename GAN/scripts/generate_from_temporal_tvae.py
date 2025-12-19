@@ -18,10 +18,61 @@ from pathlib import Path
 import sys
 
 import pandas as pd
+import numpy as np
 from sdv.single_table import TVAESynthesizer
+import zlib
 
-# Add parent directory to path
-sys.path.append(str(Path(__file__).parent.parent))
+# Ensure project root is importable so `GAN.*` namespace imports work reliably
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+
+def _build_monotonic_rul_curve(max_rul: float, n: int, pattern: str) -> np.ndarray:
+    """Create a deterministic monotonic RUL curve from max_rul down to 0.
+
+    Important: We intentionally do NOT add noise here.
+    TVAE already provides sensor variability; adding noise to the RUL label
+    can break monotonicity and confuse downstream chronological validation.
+    """
+    if n <= 0:
+        return np.array([], dtype=float)
+    if n == 1:
+        return np.array([float(max_rul)], dtype=float)
+
+    max_rul = float(max_rul)
+    t = np.linspace(0.0, 1.0, n)
+
+    if pattern == 'exponential':
+        # Accelerating degradation (slow early, fast near end)
+        rul = max_rul * (1.0 - t**2)
+    else:
+        # Default linear patterns
+        rul = max_rul * (1.0 - t)
+
+    # Hard guarantee: last sample is exactly 0 and values are non-negative.
+    rul[-1] = 0.0
+    return np.clip(rul, 0.0, None).astype(float)
+
+
+def _assign_sequential_timestamps(n: int, max_rul_hours: float) -> pd.Series:
+    """Assign strictly increasing timestamps spanning max_rul_hours.
+
+    If max_rul_hours is in hours of remaining life, then a single lifecycle
+    of n samples should span roughly max_rul_hours.
+    """
+    start = pd.Timestamp('2024-01-01')
+    if n <= 0:
+        return pd.to_datetime(pd.Series([], dtype='datetime64[ns]'))
+    if n == 1:
+        return pd.Series([start])
+
+    max_rul_hours = float(max_rul_hours) if max_rul_hours is not None else float(n - 1)
+    if not np.isfinite(max_rul_hours) or max_rul_hours <= 0:
+        max_rul_hours = float(n - 1)
+
+    step_seconds = (max_rul_hours * 3600.0) / float(n - 1)
+    offsets = pd.to_timedelta(np.arange(n) * step_seconds, unit='s')
+    return pd.Series(start + offsets)
 
 
 def generate_temporal_data(machine_id, num_samples=50000, train_split=0.70, val_split=0.15):
@@ -88,46 +139,89 @@ def generate_temporal_data(machine_id, num_samples=50000, train_split=0.70, val_
     print(f"   Shape: {synthetic_data.shape}")
     print(f"   Columns: {list(synthetic_data.columns)}")
     
-    # CRITICAL: Sort by RUL and assign sequential timestamps
-    # This ensures chronological order and proper RUL degradation for ALL future generations
+    # CRITICAL: Establish a consistent severity ordering.
+    # TVAE samples are i.i.d. We use the sampled RUL ONLY as a *rank signal*
+    # to order rows from healthy → failed (high → low) while preserving learned
+    # sensor correlations.
+    #
+    # IMPORTANT: We will (re)assign deterministic RUL curves and timestamps
+    # AFTER splitting so that each split (train/val/test) has its own full
+    # lifecycle curve from max_rul → 0 with strictly increasing timestamps.
     print(f"\n   [AUTO-FIX] Applying chronological ordering...")
-    print(f"   - Sorting by RUL (descending) for degradation pattern")
-    print(f"   - Assigning sequential timestamps (1 hour intervals)")
-    
-    synthetic_data = synthetic_data.sort_values('rul', ascending=False).reset_index(drop=True)
-    synthetic_data['timestamp'] = pd.date_range(start='2024-01-01', periods=len(synthetic_data), freq='1H')
-    
-    print(f"   - First RUL: {synthetic_data['rul'].iloc[0]:.2f} -> Last RUL: {synthetic_data['rul'].iloc[-1]:.2f}")
-    print(f"   - First timestamp: {synthetic_data['timestamp'].iloc[0]}")
-    print(f"   - Last timestamp: {synthetic_data['timestamp'].iloc[-1]}")
-    
-    # Step 3: Verify RUL column exists
-    print(f"\n[3/6] Verifying RUL column presence")
+    print(f"   - Sorting by generated RUL (descending) to preserve rank")
+    print(f"   - Will assign per-split RUL + timestamps after splitting")
+
     if 'rul' not in synthetic_data.columns:
         raise ValueError(
             f"RUL column not found in generated data!\n"
             f"Columns: {list(synthetic_data.columns)}\n"
             f"Model may not have been retrained with temporal seed data."
         )
+
+    synthetic_data = synthetic_data.sort_values('rul', ascending=False).reset_index(drop=True)
+    synthetic_data['__severity_rank'] = np.arange(len(synthetic_data), dtype=int)
     
-    rul_min = synthetic_data['rul'].min()
-    rul_max = synthetic_data['rul'].max()
-    rul_mean = synthetic_data['rul'].mean()
+    # Step 3: Verify RUL column exists
+    print(f"\n[3/6] Verifying RUL column presence")
+    # RUL presence already checked above.
+    
+    # Load RUL profile for deterministic curve and time span.
+    try:
+        from GAN.config.rul_profiles import get_rul_profile
+
+        rul_profile = get_rul_profile(machine_id) or {}
+        max_rul = float(rul_profile.get('max_rul', float(synthetic_data['rul'].max())))
+        pattern = str(rul_profile.get('degradation_pattern', 'linear_slow'))
+    except Exception:
+        max_rul = float(synthetic_data['rul'].max())
+        pattern = 'linear_slow'
+
+    # Report based on the configured lifecycle curve (not the sampled distribution)
+    rul_min = 0.0
+    rul_max = max_rul
+    rul_mean = max_rul / 2.0
     
     print(f"   RUL column present: YES")
     print(f"   RUL range: [{rul_min:.1f}, {rul_max:.1f}]")
     print(f"   RUL mean: {rul_mean:.1f}")
     
-    # Step 4: Split data (70/15/15)
+    # Step 4: Split data (train/val/test)
+    # Traditional ML split: RANDOM selection into splits.
+    # To keep each parquet file usable for time-series inspection, we sort each split by timestamp.
     print(f"\n[4/6] Splitting data into train/val/test")
+
+    n_total = len(synthetic_data)
+    n_train = int(n_total * train_split)
+    n_val = int(n_total * val_split)
+    n_test = n_total - n_train - n_val
+
+    # Deterministic per-machine shuffle so repeated generations are stable.
+    seed = zlib.crc32(machine_id.encode('utf-8')) & 0xFFFFFFFF
+    rng = np.random.default_rng(seed)
+    indices = np.arange(n_total)
+    rng.shuffle(indices)
+
+    train_idx = indices[:n_train]
+    val_idx = indices[n_train:n_train + n_val]
+    test_idx = indices[n_train + n_val:]
+
+    def _finalize_split(df: pd.DataFrame) -> pd.DataFrame:
+        # Order by severity rank so the split itself has a run-to-failure sequence.
+        df = df.sort_values('__severity_rank').reset_index(drop=True)
+        df['rul'] = _build_monotonic_rul_curve(max_rul=max_rul, n=len(df), pattern=pattern)
+        df['timestamp'] = _assign_sequential_timestamps(n=len(df), max_rul_hours=max_rul)
+        return df
+
+    train_data = _finalize_split(synthetic_data.iloc[train_idx].copy())
+    val_data = _finalize_split(synthetic_data.iloc[val_idx].copy())
+    test_data = _finalize_split(synthetic_data.iloc[test_idx].copy())
+
+    # Drop helper columns before saving
+    for df in (train_data, val_data, test_data):
+        if '__severity_rank' in df.columns:
+            df.drop(columns=['__severity_rank'], inplace=True)
     
-    train_end = int(num_samples * train_split)
-    val_end = train_end + int(num_samples * val_split)
-    
-    train_data = synthetic_data.iloc[:train_end]
-    val_data = synthetic_data.iloc[train_end:val_end]
-    test_data = synthetic_data.iloc[val_end:]
-    
+    print(f"   Split mode: random (seed={seed})")
     print(f"   Train: {len(train_data):,} samples ({train_split*100:.0f}%)")
     print(f"   Val:   {len(val_data):,} samples ({val_split*100:.0f}%)")
     print(f"   Test:  {len(test_data):,} samples ({(1-train_split-val_split)*100:.0f}%)")

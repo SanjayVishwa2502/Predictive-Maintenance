@@ -24,9 +24,11 @@ from sdv.single_table import TVAESynthesizer
 from sdv.metadata import SingleTableMetadata
 from sdv.evaluation.single_table import evaluate_quality
 
-# Add parent directory to path for config import
-sys.path.append(str(Path(__file__).parent.parent))
-from config.tvae_config import TVAE_CONFIG
+# Ensure project root is importable so `GAN.*` namespace imports work reliably
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from GAN.config.tvae_config import TVAE_CONFIG
 
 
 def create_temporal_metadata(seed_data, machine_id):
