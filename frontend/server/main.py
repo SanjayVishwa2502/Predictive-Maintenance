@@ -117,12 +117,13 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 # ============================================================================
 
 # Import routers
-from api.routes import auth, gan, websocket, ml
+from api.routes import auth, gan, websocket, ml, ml_training
 
 # Include routers with proper prefixes and tags
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(gan.router, prefix="/api/gan", tags=["GAN"])
 app.include_router(ml.router, tags=["ML Predictions"])  # Day 19.2: ML API integration
+app.include_router(ml_training.router, tags=["ML Training"])  # Phase 3.7.8.1: ML training API routes
 app.include_router(websocket.router, tags=["WebSocket"])
 
 # TODO: Add remaining routers as implemented

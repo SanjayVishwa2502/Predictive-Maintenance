@@ -26,6 +26,8 @@ import {
 import {
   Timeline as TimelineIcon,
   AutoFixHigh as AutoFixHighIcon,
+  School as SchoolIcon,
+  Inventory as InventoryIcon,
   History as HistoryIcon,
   Assessment as AssessmentIcon,
   PlaylistPlay as PlaylistPlayIcon,
@@ -46,6 +48,7 @@ interface NavOption {
 interface NavigationPanelProps {
   selectedView: string;
   onSelectView: (view: string) => void;
+  onContinueWorkflow?: () => void;
 }
 
 const navOptions: NavOption[] = [
@@ -60,19 +63,33 @@ const navOptions: NavOption[] = [
     label: 'New Machine Wizard',
     icon: <AutoFixHighIcon />,
     description: 'Generate synthetic training data',
+    dividerAfter: false,
+  },
+  {
+    id: 'continue_workflow',
+    label: 'Continue Workflow',
+    icon: <AssessmentIcon />,
+    description: 'Resume GAN workflow from last step',
     dividerAfter: true,
+  },
+  {
+    id: 'training',
+    label: 'Model Training',
+    icon: <SchoolIcon />,
+    description: 'Train all 4 ML models from synthetic data',
+    dividerAfter: true,
+  },
+  {
+    id: 'models',
+    label: 'Manage Models',
+    icon: <InventoryIcon />,
+    description: 'Delete corrupted models and retrain',
   },
   {
     id: 'history',
     label: 'Prediction History',
     icon: <HistoryIcon />,
     description: 'View past predictions and trends',
-  },
-  {
-    id: 'reports',
-    label: 'Reports',
-    icon: <AssessmentIcon />,
-    description: 'Generate analysis reports',
   },
   {
     id: 'tasks',
@@ -95,7 +112,7 @@ const navOptions: NavOption[] = [
   },
 ];
 
-export default function NavigationPanel({ selectedView, onSelectView }: NavigationPanelProps) {
+export default function NavigationPanel({ selectedView, onSelectView, onContinueWorkflow }: NavigationPanelProps) {
   const { runningTasks, completedTasks } = useTaskSession();
   const runningCount = runningTasks.length;
 
@@ -128,8 +145,14 @@ export default function NavigationPanel({ selectedView, onSelectView }: Navigati
             <Box key={option.id}>
               <ListItem disablePadding>
                 <ListItemButton
-                  selected={selectedView === option.id}
-                  onClick={() => onSelectView(option.id)}
+                  selected={option.id !== 'continue_workflow' && selectedView === option.id}
+                  onClick={() => {
+                    if (option.id === 'continue_workflow') {
+                      onContinueWorkflow?.();
+                      return;
+                    }
+                    onSelectView(option.id);
+                  }}
                   sx={{
                     mx: 1,
                     borderRadius: 2,
@@ -147,7 +170,7 @@ export default function NavigationPanel({ selectedView, onSelectView }: Navigati
                 >
                   <ListItemIcon
                     sx={{
-                      color: selectedView === option.id ? '#667eea' : '#9ca3af',
+                      color: option.id !== 'continue_workflow' && selectedView === option.id ? '#667eea' : '#9ca3af',
                       minWidth: 40,
                     }}
                   >

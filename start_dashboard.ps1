@@ -11,6 +11,10 @@ $ProjectRoot = "C:\Projects\Predictive Maintenance"
 $LogDir = "$ProjectRoot\logs"
 $Timestamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
 
+# Optional: enable uvicorn auto-reload for development.
+# Set env var PM_UVICORN_RELOAD=1 to restart the API server on code changes.
+$UvicornReload = ($env:PM_UVICORN_RELOAD -eq "1")
+
 # Optional: purge any pending Celery tasks from previous runs.
 # Why: Celery uses Redis as a broker; if a training task was queued earlier and the worker
 # was stopped, the task can remain pending and will execute as soon as the worker starts.
@@ -129,7 +133,11 @@ Write-ColorOutput "[STARTUP] Launching services in background..." "Green"
 # 1. Backend (FastAPI) - System PowerShell Window
 Write-ColorOutput "[1/4] Starting Backend Server (FastAPI)..." "Green"
 $backendLog = "$LogDir\backend_$Timestamp.log"
-$backendCmd = "cd '$ProjectRoot\frontend\server'; & '$ProjectRoot\venv\Scripts\Activate.ps1'; Write-Host '=== BACKEND SERVER (Port 8000) ===' -ForegroundColor Green; uvicorn main:app --host 0.0.0.0 --port 8000 2>&1 | Tee-Object -FilePath '$backendLog'"
+$uvicornArgs = "main:app --host 0.0.0.0 --port 8000"
+if ($UvicornReload) {
+    $uvicornArgs = "$uvicornArgs --reload"
+}
+$backendCmd = "cd '$ProjectRoot\frontend\server'; & '$ProjectRoot\venv\Scripts\Activate.ps1'; Write-Host '=== BACKEND SERVER (Port 8000) ===' -ForegroundColor Green; uvicorn $uvicornArgs 2>&1 | Tee-Object -FilePath '$backendLog'"
 Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoExit", "-Command", $backendCmd
 Write-ColorOutput "     Log: $backendLog" "Gray"
 

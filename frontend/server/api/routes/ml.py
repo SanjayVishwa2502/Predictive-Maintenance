@@ -27,8 +27,16 @@ from ..models.ml import (
     HealthCheckResponse,
     ModelsLoaded,
     GPUInfo,
-    ErrorResponse
+    ErrorResponse,
+    ModelArtifactStatus,
+    MachineModelInventory,
+    ModelInventoryResponse,
+    DeleteModelResponse,
+    DeleteAllModelsResponse,
+    ModelType,
 )
+import shutil
+import json as jsonlib
 
 # Import MLManager singleton
 import sys
@@ -42,6 +50,244 @@ logger = logging.getLogger(__name__)
 
 # Create router
 router = APIRouter(prefix="/api/ml", tags=["ML Predictions"])
+
+
+def _model_dir(model_type: str, machine_id: str) -> PathLib:
+    return ml_manager.project_root / "ml_models" / "models" / model_type / machine_id
+
+
+def _report_path(model_type: str, machine_id: str) -> PathLib:
+    perf_dir = ml_manager.project_root / "ml_models" / "reports" / "performance_metrics"
+    if model_type == "classification":
+        return perf_dir / f"{machine_id}_classification_report.json"
+    if model_type == "regression":
+        return perf_dir / f"{machine_id}_regression_report.json"
+    if model_type == "anomaly":
+        return perf_dir / f"{machine_id}_comprehensive_anomaly_report.json"
+    if model_type == "timeseries":
+        return perf_dir / f"{machine_id}_timeseries_report.json"
+    raise ValueError(f"Unknown model_type: {model_type}")
+
+
+def _dir_non_empty(path: PathLib) -> bool:
+    try:
+        return path.is_dir() and any(path.iterdir())
+    except Exception:
+        return path.is_dir()
+
+
+def _compute_model_status(model_type: str, machine_id: str) -> ModelArtifactStatus:
+    model_path = _model_dir(model_type, machine_id)
+    report_path = _report_path(model_type, machine_id)
+    issues = []
+
+    model_exists = model_path.exists()
+    model_non_empty = _dir_non_empty(model_path)
+    report_exists = report_path.exists()
+    report_valid = True
+
+    if model_exists and not model_non_empty:
+        issues.append("model_dir_empty")
+
+    if report_exists:
+        try:
+            with open(report_path, "r", encoding="utf-8") as f:
+                jsonlib.load(f)
+        except Exception:
+            report_valid = False
+            issues.append("report_invalid_json")
+    else:
+        issues.append("report_missing")
+        report_valid = False
+
+    if not model_exists:
+        # If there's no model directory, treat as missing regardless of report.
+        return ModelArtifactStatus(
+            status="missing",
+            model_dir=str(model_path),
+            report_path=str(report_path),
+            issues=["model_dir_missing"],
+        )
+
+    if model_non_empty and report_exists and report_valid:
+        return ModelArtifactStatus(
+            status="available",
+            model_dir=str(model_path),
+            report_path=str(report_path),
+            issues=[],
+        )
+
+    return ModelArtifactStatus(
+        status="corrupted",
+        model_dir=str(model_path),
+        report_path=str(report_path),
+        issues=issues,
+    )
+
+
+def _discover_machine_ids_from_models() -> set[str]:
+    machine_ids: set[str] = set()
+    models_root = ml_manager.project_root / "ml_models" / "models"
+    for model_type in ("classification", "regression", "anomaly", "timeseries"):
+        type_dir = models_root / model_type
+        if not type_dir.exists():
+            continue
+        try:
+            for entry in type_dir.iterdir():
+                if entry.is_dir():
+                    machine_ids.add(entry.name)
+        except Exception:
+            continue
+    return machine_ids
+
+
+def _discover_machine_ids_from_synthetic_data() -> set[str]:
+    """Discover machines that have synthetic training data available.
+
+    This is important for model management UX: if a machine has synthetic data but
+    no model artifacts (e.g., after deletion), it should still appear in the
+    inventory so the UI can show it as missing and allow retraining.
+    """
+    base = ml_manager.project_root / "GAN" / "data" / "synthetic"
+    machine_ids: set[str] = set()
+    if not base.exists():
+        return machine_ids
+    try:
+        for child in base.iterdir():
+            if not child.is_dir():
+                continue
+            if (child / "train.parquet").exists():
+                machine_ids.add(child.name)
+    except Exception:
+        return machine_ids
+    return machine_ids
+
+
+@router.get(
+    "/models/inventory",
+    response_model=ModelInventoryResponse,
+    summary="Model Inventory",
+    description="Return per-machine, per-model-type status (missing/available/corrupted).",
+)
+async def model_inventory():
+    try:
+        machines_from_manager = list(ml_manager.get_machines())
+        meta_by_id = {getattr(m, 'machine_id', None): m for m in machines_from_manager}
+
+        machine_ids = set(m.machine_id for m in machines_from_manager)
+        machine_ids.update(_discover_machine_ids_from_models())
+        machine_ids.update(_discover_machine_ids_from_synthetic_data())
+
+        machines: list[MachineModelInventory] = []
+        for machine_id in sorted(machine_ids):
+            meta = meta_by_id.get(machine_id)
+            manufacturer = getattr(meta, 'manufacturer', None) if meta else None
+            model = getattr(meta, 'model', None) if meta else None
+            display_name = getattr(meta, 'display_name', None) if meta else None
+            category = getattr(meta, 'category', None) if meta else None
+
+            if not display_name and manufacturer and model:
+                display_name = f"{manufacturer} {model}"
+
+            statuses = {
+                "classification": _compute_model_status("classification", machine_id),
+                "regression": _compute_model_status("regression", machine_id),
+                "anomaly": _compute_model_status("anomaly", machine_id),
+                "timeseries": _compute_model_status("timeseries", machine_id),
+            }
+            machines.append(
+                MachineModelInventory(
+                    machine_id=machine_id,
+                    display_name=display_name,
+                    category=category,
+                    manufacturer=manufacturer,
+                    model=model,
+                    models=statuses,
+                )
+            )
+
+        return ModelInventoryResponse(machines=machines, total=len(machines))
+    except Exception as e:
+        logger.error(f"Failed to build model inventory: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to build model inventory: {str(e)}")
+
+
+@router.delete(
+    "/models/{machine_id}/{model_type}",
+    response_model=DeleteModelResponse,
+    summary="Delete Model Artifacts",
+    description="Delete a machine's model directory and its performance report file.",
+)
+async def delete_model(
+    machine_id: str = Path(..., description="Machine identifier"),
+    model_type: ModelType = Path(..., description="Model type"),
+):
+    try:
+        model_type_str = model_type.value
+        model_path = _model_dir(model_type_str, machine_id)
+        report_path = _report_path(model_type_str, machine_id)
+
+        deleted_model_dir = False
+        deleted_report_file = False
+
+        if model_path.exists() and model_path.is_dir():
+            shutil.rmtree(model_path)
+            deleted_model_dir = True
+
+        if report_path.exists() and report_path.is_file():
+            report_path.unlink()
+            deleted_report_file = True
+
+        return DeleteModelResponse(
+            machine_id=machine_id,
+            model_type=model_type_str,
+            deleted_model_dir=deleted_model_dir,
+            deleted_report_file=deleted_report_file,
+        )
+    except Exception as e:
+        logger.error(f"Failed to delete model artifacts: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete model artifacts: {str(e)}")
+
+
+@router.delete(
+    "/models/{machine_id}",
+    response_model=DeleteAllModelsResponse,
+    summary="Delete All Model Artifacts",
+    description="Delete all model directories and performance report files for a machine.",
+)
+async def delete_all_models(
+    machine_id: str = Path(..., description="Machine identifier"),
+):
+    results: dict[str, DeleteModelResponse] = {}
+    errors: dict[str, str] = {}
+
+    for model_type_str in ("classification", "regression", "anomaly", "timeseries"):
+        try:
+            model_path = _model_dir(model_type_str, machine_id)
+            report_path = _report_path(model_type_str, machine_id)
+
+            deleted_model_dir = False
+            deleted_report_file = False
+
+            if model_path.exists() and model_path.is_dir():
+                shutil.rmtree(model_path)
+                deleted_model_dir = True
+
+            if report_path.exists() and report_path.is_file():
+                report_path.unlink()
+                deleted_report_file = True
+
+            results[model_type_str] = DeleteModelResponse(
+                machine_id=machine_id,
+                model_type=model_type_str,
+                deleted_model_dir=deleted_model_dir,
+                deleted_report_file=deleted_report_file,
+            )
+        except Exception as e:
+            logger.error(f"Failed deleting {model_type_str} for {machine_id}: {e}")
+            errors[model_type_str] = str(e)
+
+    return DeleteAllModelsResponse(machine_id=machine_id, results=results, errors=errors)
 
 
 # ============================================================
@@ -81,7 +327,12 @@ async def list_machines():
         # This prevents the dashboard selector from showing machines that cannot run predictions.
         machines_data = [
             m for m in machines_data
-            if getattr(m, 'has_classification_model', False) or getattr(m, 'has_regression_model', False)
+            if (
+                getattr(m, 'has_classification_model', False)
+                or getattr(m, 'has_regression_model', False)
+                or getattr(m, 'has_anomaly_model', False)
+                or getattr(m, 'has_timeseries_model', False)
+            )
         ]
         
         # Convert to Pydantic models (machines_data is already list of MachineInfo dataclasses)
@@ -233,6 +484,7 @@ async def predict_classification(request: PredictionRequest):
             prediction=ClassificationPrediction(
                 failure_type=result.failure_type,
                 confidence=result.confidence,
+                failure_probability=result.failure_probability,
                 all_probabilities=result.all_probabilities,
                 model_info=ModelInfo(
                     path="ml_models/models/classification/" + result.machine_id,

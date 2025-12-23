@@ -221,7 +221,8 @@ class ProphetForecaster:
     
     def save_models(self, metrics, training_time):
         """Save Prophet models and metadata"""
-        save_path = Path('../../models/timeseries') / self.machine_id
+        project_root = Path(__file__).resolve().parent.parent.parent.parent
+        save_path = project_root / 'ml_models' / 'models' / 'timeseries' / self.machine_id
         save_path.mkdir(parents=True, exist_ok=True)
         
         # Save all Prophet models
@@ -288,7 +289,8 @@ def train_timeseries_model(machine_id, forecast_hours=24):
     metadata = forecaster.save_models(metrics, training_time)
     
     # Save performance report
-    report_path = Path('../../reports/performance_metrics')
+    project_root = Path(__file__).resolve().parent.parent.parent.parent
+    report_path = project_root / 'ml_models' / 'reports' / 'performance_metrics'
     report_path.mkdir(parents=True, exist_ok=True)
     
     report = {
@@ -302,7 +304,7 @@ def train_timeseries_model(machine_id, forecast_hours=24):
     }
     
     report_file = report_path / f'{machine_id}_timeseries_report.json'
-    with open(report_file, 'w') as f:
+    with open(report_file, 'w', encoding='utf-8') as f:
         json.dump(report, f, indent=2)
     
     print(f"\n✅ Report saved: {report_file}\n")

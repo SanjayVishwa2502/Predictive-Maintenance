@@ -13,7 +13,9 @@ import {
 } from '@mui/material';
 
 import { ganApi } from '../../api/ganApi';
+import { mlTrainingApi } from '../../api/mlTrainingApi';
 import { useTaskSession } from '../../context/TaskSessionContext';
+import { useDashboard } from '../../context/DashboardContext';
 
 function formatEta(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return '—';
@@ -34,7 +36,8 @@ function computeEtaMs(progressPercent: number | undefined, startedAt: number): n
 }
 
 export default function TaskMonitor() {
-  const { runningTasks, completedTasks, updateTaskFromStatus } = useTaskSession();
+  const { runningTasks, completedTasks, updateTaskFromStatus, focusTask } = useTaskSession();
+  const { setSelectedView, setSelectedMachineId } = useDashboard();
   const [error, setError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState<Record<string, boolean>>({});
 
@@ -58,7 +61,9 @@ export default function TaskMonitor() {
     await Promise.all(
       tasksToPoll.map(async (t) => {
         try {
-          const status = await ganApi.getTaskStatus(t.task_id);
+          const status = t.kind === 'ml_train'
+            ? await mlTrainingApi.getTaskStatus(t.task_id)
+            : await ganApi.getTaskStatus(t.task_id);
           updateTaskFromStatus(t.task_id, status);
         } catch (e: any) {
           // Preserve first error but keep polling the rest.
@@ -91,7 +96,12 @@ export default function TaskMonitor() {
     setError(null);
     setCancelling((prev) => ({ ...prev, [taskId]: true }));
     try {
-      await ganApi.cancelTask(taskId);
+      const task = activeTasks.find((t) => t.task_id === taskId) || allTasks.find((t) => t.task_id === taskId);
+      if (task?.kind === 'ml_train') {
+        await mlTrainingApi.cancelTask(taskId);
+      } else {
+        await ganApi.cancelTask(taskId);
+      }
       // Task may not stop immediately; we rely on polling to reflect REVOKED/FAILURE.
       await refresh();
     } catch (e: any) {
@@ -101,6 +111,12 @@ export default function TaskMonitor() {
     }
   };
 
+  const openTask = (t: { task_id: string; machine_id: string; kind: 'gan' | 'ml_train' }) => {
+    focusTask(t.task_id);
+    setSelectedMachineId(t.machine_id || null);
+    setSelectedView(t.kind === 'ml_train' ? 'training' : 'gan');
+  };
+
   const TaskCard = ({ t }: { t: any }) => {
     const pct = typeof t.progress_percent === 'number' ? Math.max(0, Math.min(100, t.progress_percent)) : undefined;
     const etaMs = computeEtaMs(pct, t.started_at);
@@ -108,10 +124,21 @@ export default function TaskMonitor() {
 
     return (
       <Paper
+        role="button"
+        tabIndex={0}
+        onClick={() => openTask(t)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            openTask(t);
+          }
+        }}
         sx={{
           p: 2,
           bgcolor: 'rgba(255, 255, 255, 0.02)',
           border: '1px solid rgba(255, 255, 255, 0.08)',
+          cursor: 'pointer',
+          '&:hover': { borderColor: 'rgba(102, 126, 234, 0.55)' },
         }}
       >
         <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={1}>
@@ -143,7 +170,10 @@ export default function TaskMonitor() {
                 size="small"
                 variant="outlined"
                 disabled={Boolean(cancelling[t.task_id])}
-                onClick={() => handleCancel(t.task_id)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleCancel(t.task_id);
+                }}
               >
                 {cancelling[t.task_id] ? 'Cancelling…' : 'Cancel'}
               </Button>
@@ -174,6 +204,7 @@ export default function TaskMonitor() {
             value={logsText}
             placeholder="Logs will appear here…"
             InputProps={{ readOnly: true }}
+            onClick={(e) => e.stopPropagation()}
           />
         </Box>
       </Paper>

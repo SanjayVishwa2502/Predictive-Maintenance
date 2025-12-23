@@ -77,7 +77,11 @@ import { TaskSessionProvider } from '../modules/ml/context/TaskSessionContext';
 import TaskSessionView from '../modules/ml/components/TaskSessionView';
 import GANWizardView from '../modules/ml/components/gan/GANWizardView';
 import GlobalTaskBanner from '../modules/ml/components/GlobalTaskBanner';
+import ModelTrainingView from '../modules/ml/components/training/ModelTrainingView';
+import ManageModelsView from '../modules/ml/components/models/ManageModelsView';
+import TaskStatusPoller from '../modules/ml/components/TaskStatusPoller';
 import { DashboardProvider, useDashboard } from '../modules/ml/context/DashboardContext';
+import { ganApi } from '../modules/ml/api/ganApi';
 import type { SensorReading } from '../modules/ml/components/SensorCharts';
 import type { HistoricalPrediction } from '../modules/ml/components/PredictionHistory';
 import type { PredictionResult as PredictionCardResult } from '../modules/ml/components/PredictionCard';
@@ -124,7 +128,10 @@ function MLDashboardPageInner() {
   const [showExplanation, setShowExplanation] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  const [ganResumeState, setGanResumeState] = useState<{ machine_id: string; current_step: number } | null>(null);
   
   // Day 19.1: Connection & polling state
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -429,7 +436,7 @@ function MLDashboardPageInner() {
 
   // Handle machine selection
   const handleMachineSelect = (machineId: string) => {
-    setSelectedMachineId(machineId);
+    setSelectedMachineId(machineId ? machineId : null);
     setPrediction(null);
     setSensorHistory([]);
   };
@@ -450,6 +457,8 @@ function MLDashboardPageInner() {
     switch (view) {
       case 'predictions': return 'Predictions';
       case 'gan': return 'New Machine Wizard';
+      case 'training': return 'Model Training';
+      case 'models': return 'Manage Models';
       case 'history': return 'Prediction History';
       case 'reports': return 'Reports';
       case 'tasks': return 'Tasks';
@@ -463,8 +472,27 @@ function MLDashboardPageInner() {
   // RENDER
   // ============================================================================
 
+  const handleContinueWorkflow = useCallback(async () => {
+    try {
+      const resp = await ganApi.getContinueWorkflow();
+      const st = resp?.state;
+      if (!resp?.has_state || !st?.machine_id) {
+        setSelectedView('gan');
+        setInfoMessage('No GAN workflow to continue yet. Start a workflow in New Machine Wizard first.');
+        return;
+      }
+
+      setGanResumeState({ machine_id: st.machine_id, current_step: st.current_step ?? 0 });
+      setSelectedView('gan');
+      setSuccessMessage(`Continuing workflow for ${st.machine_id}`);
+    } catch (e: any) {
+      setError(e?.message || 'Failed to continue workflow');
+    }
+  }, [setSelectedView]);
+
   return (
     <TaskSessionProvider>
+      <TaskStatusPoller />
       <Box sx={{ display: 'flex' }}>
         <CssBaseline />
       
@@ -575,6 +603,10 @@ function MLDashboardPageInner() {
           selectedView={selectedView}
           onSelectView={(view: string) => {
             setSelectedView(view as typeof selectedView);
+            setDrawerOpen(false);
+          }}
+          onContinueWorkflow={async () => {
+            await handleContinueWorkflow();
             setDrawerOpen(false);
           }}
         />
@@ -731,9 +763,15 @@ function MLDashboardPageInner() {
         {/* Phase 3.7.6.2: GAN Wizard View */}
         {selectedView === 'gan' && (
           <Container maxWidth="xl">
-            <GANWizardView onBack={() => setSelectedView('predictions')} />
+            <GANWizardView onBack={() => setSelectedView('predictions')} resumeState={ganResumeState} />
           </Container>
         )}
+
+        {/* Phase 3.7.8.4: Model Training View */}
+        {selectedView === 'training' && <ModelTrainingView />}
+
+        {/* Phase 3.7.8.5: Manage Models View */}
+        {selectedView === 'models' && <ManageModelsView />}
 
         {/* Phase 3.7.6.1: History View (Stub) */}
         {selectedView === 'history' && (
@@ -830,6 +868,21 @@ function MLDashboardPageInner() {
             sx={{ width: '100%' }}
           >
             {successMessage}
+          </Alert>
+        </Snackbar>
+
+        <Snackbar
+          open={!!infoMessage}
+          autoHideDuration={4000}
+          onClose={() => setInfoMessage(null)}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        >
+          <Alert
+            onClose={() => setInfoMessage(null)}
+            severity="info"
+            sx={{ width: '100%' }}
+          >
+            {infoMessage}
           </Alert>
         </Snackbar>
 

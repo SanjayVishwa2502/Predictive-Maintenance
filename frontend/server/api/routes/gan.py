@@ -38,6 +38,8 @@ from api.models.gan import (
     TaskProgress,
     HealthCheckResponse,
     ErrorResponse,
+    ContinueWorkflowState,
+    ContinueWorkflowResponse,
     # Enums
     MachineStatus,
     TaskStatus,
@@ -132,6 +134,94 @@ router = APIRouter()
 RATE_LIMIT = 100  # requests per minute
 RATE_WINDOW = 60  # seconds
 CACHE_TTL = 30  # seconds for cached responses
+
+# Persisted continuation state (survives browser refresh); keep for a while.
+CONTINUE_WORKFLOW_TTL_SECONDS = 60 * 60 * 24 * 14  # 14 days
+
+
+def _client_workflow_key(request: Request) -> str:
+    """Key workflow state by a stable client id when available."""
+    cid = (request.headers.get("x-pm-client-id") or "").strip()
+    if cid:
+        # Keep it short/safe for Redis keys
+        cid = cid[:128]
+        return f"gan:continue:{cid}"
+    client_ip = request.client.host if request.client else "unknown"
+    return f"gan:continue:ip:{client_ip}"
+
+
+async def _get_continue_state(request: Request) -> Optional[ContinueWorkflowState]:
+    redis_client = await get_redis()
+    key = _client_workflow_key(request)
+    try:
+        raw = await redis_client.get(key)
+        if not raw:
+            return None
+        data = json.loads(raw)
+        return ContinueWorkflowState(**data)
+    except Exception:
+        return None
+    finally:
+        await redis_client.close()
+
+
+async def _set_continue_state(request: Request, state: ContinueWorkflowState) -> None:
+    redis_client = await get_redis()
+    key = _client_workflow_key(request)
+    try:
+        payload = state.model_dump()
+        payload["updated_at"] = datetime.utcnow().isoformat()
+        await redis_client.setex(key, CONTINUE_WORKFLOW_TTL_SECONDS, json.dumps(payload, default=str))
+    finally:
+        await redis_client.close()
+
+
+async def _clear_continue_state(request: Request) -> None:
+    redis_client = await get_redis()
+    key = _client_workflow_key(request)
+    try:
+        await redis_client.delete(key)
+    finally:
+        await redis_client.close()
+
+
+# ============================================================================
+# WORKFLOW CONTINUATION ENDPOINTS (Persisted)
+# ============================================================================
+
+
+@router.get(
+    "/workflow/continue",
+    response_model=ContinueWorkflowResponse,
+    summary="Get persisted workflow continuation state",
+)
+async def get_workflow_continue_state(request: Request):
+    await rate_limiter(request)
+    state = await _get_continue_state(request)
+    return ContinueWorkflowResponse(has_state=state is not None, state=state)
+
+
+@router.put(
+    "/workflow/continue",
+    response_model=ContinueWorkflowResponse,
+    summary="Set persisted workflow continuation state",
+)
+async def set_workflow_continue_state(request: Request, state: ContinueWorkflowState = Body(...)):
+    await rate_limiter(request)
+    await _set_continue_state(request, state)
+    saved = await _get_continue_state(request)
+    return ContinueWorkflowResponse(has_state=saved is not None, state=saved)
+
+
+@router.delete(
+    "/workflow/continue",
+    response_model=ContinueWorkflowResponse,
+    summary="Clear persisted workflow continuation state",
+)
+async def clear_workflow_continue_state(request: Request):
+    await rate_limiter(request)
+    await _clear_continue_state(request)
+    return ContinueWorkflowResponse(has_state=False, state=None)
 
 
 async def get_redis() -> redis.Redis:

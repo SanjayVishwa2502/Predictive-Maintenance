@@ -39,6 +39,63 @@ class ModelType(str, Enum):
 
 
 # ============================================================
+# Response Models - Model Inventory / Management
+# ============================================================
+
+
+class ModelArtifactStatus(BaseModel):
+    """Status for a single model type's artifacts."""
+
+    status: str = Field(..., description="One of: missing, available, corrupted")
+    model_dir: Optional[str] = Field(None, description="Filesystem path to model directory")
+    report_path: Optional[str] = Field(None, description="Filesystem path to report JSON")
+    issues: List[str] = Field(default_factory=list, description="Any detected issues")
+
+
+class MachineModelInventory(BaseModel):
+    """Inventory status for all model types for a machine."""
+
+    machine_id: str = Field(..., description="Machine unique identifier")
+    display_name: Optional[str] = Field(None, description="Human-friendly display name")
+    category: Optional[str] = Field(None, description="Machine category/type")
+    manufacturer: Optional[str] = Field(None, description="Machine manufacturer")
+    model: Optional[str] = Field(None, description="Machine model")
+    models: Dict[str, ModelArtifactStatus] = Field(
+        ..., description="Per-model-type status keyed by model type string"
+    )
+
+
+class ModelInventoryResponse(BaseModel):
+    """Response model for model inventory endpoint."""
+
+    machines: List[MachineModelInventory] = Field(..., description="Inventory per machine")
+    total: int = Field(..., description="Total count of machines", ge=0)
+
+
+class DeleteModelResponse(BaseModel):
+    """Response model for deleting a model's artifacts."""
+
+    machine_id: str = Field(..., description="Machine identifier")
+    model_type: str = Field(..., description="Model type deleted")
+    deleted_model_dir: bool = Field(..., description="Whether the model directory was deleted")
+    deleted_report_file: bool = Field(..., description="Whether the report file was deleted")
+
+
+class DeleteAllModelsResponse(BaseModel):
+    """Response model for deleting all model artifacts for a machine."""
+
+    machine_id: str = Field(..., description="Machine identifier")
+    results: Dict[str, DeleteModelResponse] = Field(
+        default_factory=dict,
+        description="Per-model-type delete results keyed by model type",
+    )
+    errors: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Per-model-type error messages keyed by model type",
+    )
+
+
+# ============================================================
 # Request Models
 # ============================================================
 
@@ -51,8 +108,8 @@ class PredictionRequest(BaseModel):
         description="Machine identifier (e.g., motor_siemens_1la7_001)",
         example="motor_siemens_1la7_001"
     )
-    sensor_data: Dict[str, float] = Field(
-        ...,
+    sensor_data: Optional[Dict[str, float]] = Field(
+        None,
         description="Dictionary of sensor readings",
         example={
             "bearing_de_temp_C": 65.2,
@@ -63,14 +120,14 @@ class PredictionRequest(BaseModel):
             "voltage_phase_to_phase_V": 410.0
         }
     )
-    
-    @validator('sensor_data')
-    def validate_sensor_data(cls, v):
-        """Ensure sensor_data is not empty"""
-        if not v:
-            raise ValueError("sensor_data cannot be empty")
-        if len(v) < 1:
-            raise ValueError("sensor_data must contain at least 1 sensor reading")
+
+    @validator('sensor_data', pre=True)
+    def normalize_sensor_data(cls, v):
+        """Treat empty payloads as 'no sensor data provided'."""
+        if v is None:
+            return None
+        if isinstance(v, dict) and len(v) == 0:
+            return None
         return v
     
     class Config:

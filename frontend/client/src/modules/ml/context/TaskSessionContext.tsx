@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import type { TaskStatusResponse } from '../types/gan.types';
 
-type TaskKind = 'train';
+type TaskKind = 'gan' | 'ml_train';
 
 type SessionTaskStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILURE';
 
@@ -20,8 +20,10 @@ export interface SessionTask {
 interface TaskSessionContextValue {
   runningTasks: SessionTask[];
   completedTasks: SessionTask[];
+  focusedTaskId: string | null;
   registerRunningTask: (task: { task_id: string; machine_id: string; kind: TaskKind }) => void;
   updateTaskFromStatus: (task_id: string, status: TaskStatusResponse) => void;
+  focusTask: (taskId: string | null) => void;
 }
 
 const TaskSessionContext = createContext<TaskSessionContextValue | null>(null);
@@ -29,6 +31,7 @@ const TaskSessionContext = createContext<TaskSessionContextValue | null>(null);
 export function TaskSessionProvider({ children }: { children: React.ReactNode }) {
   const [runningById, setRunningById] = useState<Record<string, SessionTask>>({});
   const [completed, setCompleted] = useState<SessionTask[]>([]);
+  const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null);
 
   const registerRunningTask = useCallback(
     (task: { task_id: string; machine_id: string; kind: TaskKind }) => {
@@ -48,6 +51,10 @@ export function TaskSessionProvider({ children }: { children: React.ReactNode })
     },
     []
   );
+
+  const focusTask = useCallback((taskId: string | null) => {
+    setFocusedTaskId(taskId);
+  }, []);
 
   const updateTaskFromStatus = useCallback((task_id: string, status: TaskStatusResponse) => {
     const nextProgress = status.progress?.progress_percent;
@@ -92,6 +99,9 @@ export function TaskSessionProvider({ children }: { children: React.ReactNode })
         ...cPrev,
       ].slice(0, 25));
 
+      // If the user was focused on this task, clear focus once it completes.
+      setFocusedTaskId((cur) => (cur === task_id ? null : cur));
+
       return rest;
     });
   }, []);
@@ -104,10 +114,12 @@ export function TaskSessionProvider({ children }: { children: React.ReactNode })
     () => ({
       runningTasks,
       completedTasks: completed,
+      focusedTaskId,
       registerRunningTask,
       updateTaskFromStatus,
+      focusTask,
     }),
-    [runningTasks, completed, registerRunningTask, updateTaskFromStatus]
+    [runningTasks, completed, focusedTaskId, registerRunningTask, updateTaskFromStatus, focusTask]
   );
 
   return <TaskSessionContext.Provider value={value}>{children}</TaskSessionContext.Provider>;

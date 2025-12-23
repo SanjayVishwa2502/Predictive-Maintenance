@@ -41,6 +41,7 @@ class ClassificationResult:
     machine_id: str
     failure_type: str
     confidence: float
+    failure_probability: float
     all_probabilities: Dict[str, float]
     explanation: Optional[str] = None
     timestamp: str = None
@@ -277,6 +278,28 @@ class MLManager:
             return '%'
         
         return ''
+
+    def _has_model_artifacts(self, model_path: Path) -> bool:
+        """Best-effort check that a model directory exists and is non-empty."""
+        try:
+            return model_path.is_dir() and any(model_path.iterdir())
+        except Exception:
+            return model_path.is_dir()
+
+    def _discover_machine_ids_from_models_dir(self) -> List[str]:
+        """Return machine ids that have at least one model directory on disk."""
+        machine_ids = set()
+        for model_type in ("classification", "regression", "anomaly", "timeseries"):
+            type_dir = self.models_dir / model_type
+            if not type_dir.exists():
+                continue
+            try:
+                for entry in type_dir.iterdir():
+                    if entry.is_dir():
+                        machine_ids.add(entry.name)
+            except Exception:
+                continue
+        return sorted(machine_ids)
     
     def get_machines(self) -> List[MachineInfo]:
         """
@@ -285,31 +308,42 @@ class MLManager:
         Returns:
             List of MachineInfo objects
         """
-        machines = []
-        
-        # Get machines from metadata
-        for machine_id, metadata in self.machine_metadata.items():
-            # Check which models exist
+        machines: List[MachineInfo] = []
+
+        # Include both metadata-defined machines and machines that only exist on disk.
+        machine_ids = set(self.machine_metadata.keys())
+        machine_ids.update(self._discover_machine_ids_from_models_dir())
+
+        for machine_id in sorted(machine_ids):
+            metadata = self.machine_metadata.get(machine_id, {})
+
             classification_path = self.models_dir / "classification" / machine_id
             regression_path = self.models_dir / "regression" / machine_id
-            
-            sensors = metadata.get('sensors', [])
+            anomaly_path = self.models_dir / "anomaly" / machine_id
+            timeseries_path = self.models_dir / "timeseries" / machine_id
+
+            sensors = metadata.get("sensors", [])
             sensor_count = len(sensors) if sensors else 1  # Ensure at least 1 for Pydantic validation
-            
+
+            display_name = metadata.get("display_name") or self._format_display_name(machine_id)
+            category = metadata.get("category") or self._infer_category(machine_id)
+            manufacturer = metadata.get("manufacturer") or self._extract_manufacturer(machine_id)
+            model = metadata.get("model") or self._extract_model(machine_id)
+
             machine_info = MachineInfo(
                 machine_id=machine_id,
-                display_name=metadata.get('display_name', machine_id),
-                category=metadata.get('category', 'unknown'),
-                manufacturer=metadata.get('manufacturer', 'Unknown'),
-                model=metadata.get('model', 'Unknown'),
+                display_name=display_name,
+                category=category,
+                manufacturer=manufacturer,
+                model=model,
                 sensor_count=sensor_count,
-                has_classification_model=classification_path.exists(),
-                has_regression_model=regression_path.exists(),
-                has_anomaly_model=False,  # Not yet implemented
-                has_timeseries_model=False  # Not yet implemented
+                has_classification_model=self._has_model_artifacts(classification_path),
+                has_regression_model=self._has_model_artifacts(regression_path),
+                has_anomaly_model=self._has_model_artifacts(anomaly_path),
+                has_timeseries_model=self._has_model_artifacts(timeseries_path),
             )
             machines.append(machine_info)
-        
+
         return machines
     
     def get_machine_info(self, machine_id: str) -> Optional[MachineInfo]:
@@ -322,30 +356,39 @@ class MLManager:
         Returns:
             MachineInfo object or None if not found
         """
-        if machine_id not in self.machine_metadata:
-            return None
-        
-        metadata = self.machine_metadata[machine_id]
+        metadata = self.machine_metadata.get(machine_id)
+
         classification_path = self.models_dir / "classification" / machine_id
         regression_path = self.models_dir / "regression" / machine_id
-        
+        anomaly_path = self.models_dir / "anomaly" / machine_id
+        timeseries_path = self.models_dir / "timeseries" / machine_id
+
+        # If we have neither metadata nor any model artifacts, treat as unknown.
+        if metadata is None and not any(
+            self._has_model_artifacts(p)
+            for p in (classification_path, regression_path, anomaly_path, timeseries_path)
+        ):
+            return None
+
+        metadata = metadata or {}
+
         return MachineInfo(
             machine_id=machine_id,
-            display_name=metadata.get('display_name', machine_id),
-            category=metadata.get('category', 'unknown'),
-            manufacturer=metadata.get('manufacturer', 'Unknown'),
-            model=metadata.get('model', 'Unknown'),
-            sensor_count=len(metadata.get('sensors', [])),
-            has_classification_model=classification_path.exists(),
-            has_regression_model=regression_path.exists(),
-            has_anomaly_model=False,
-            has_timeseries_model=False
+            display_name=metadata.get("display_name") or self._format_display_name(machine_id),
+            category=metadata.get("category") or self._infer_category(machine_id),
+            manufacturer=metadata.get("manufacturer") or self._extract_manufacturer(machine_id),
+            model=metadata.get("model") or self._extract_model(machine_id),
+            sensor_count=len(metadata.get("sensors", [])) or 1,
+            has_classification_model=self._has_model_artifacts(classification_path),
+            has_regression_model=self._has_model_artifacts(regression_path),
+            has_anomaly_model=self._has_model_artifacts(anomaly_path),
+            has_timeseries_model=self._has_model_artifacts(timeseries_path),
         )
     
     def predict_classification(
         self, 
         machine_id: str, 
-        sensor_data: Dict[str, float]
+        sensor_data: Optional[Dict[str, float]]
     ) -> ClassificationResult:
         """
         Run classification prediction for a machine
@@ -367,8 +410,12 @@ class MLManager:
                 "ML predictions are disabled. Check server logs for details."
             )
         
-        if machine_id not in self.machine_metadata:
-            raise ValueError(f"Machine not found: {machine_id}")
+        # Allow predictions even if GAN metadata is missing, as long as model artifacts exist.
+        classification_path = self.models_dir / "classification" / machine_id
+        if not self._has_model_artifacts(classification_path):
+            raise FileNotFoundError(
+                f"Classification model not found or empty for {machine_id}. Expected: {classification_path}"
+            )
         
         logger.info(f"Running classification prediction for {machine_id}")
         
@@ -380,16 +427,25 @@ class MLManager:
                 model_type='classification'
             )
             
-            # Extract classification results
-            pred = result.get('prediction', {})
-            classification = pred.get('classification', {})
-            
+            classification_block = result.get('classification', {}) if isinstance(result, dict) else {}
+            if isinstance(classification_block, dict) and classification_block.get('error'):
+                raise RuntimeError(classification_block.get('error'))
+
+            pred = classification_block.get('prediction', {}) if isinstance(classification_block, dict) else {}
+            explanation_block = classification_block.get('explanation', {}) if isinstance(classification_block, dict) else {}
+            explanation_text = (
+                explanation_block.get('summary')
+                if isinstance(explanation_block, dict)
+                else (classification_block.get('explanation') if isinstance(classification_block, dict) else '')
+            )
+
             return ClassificationResult(
                 machine_id=machine_id,
-                failure_type=classification.get('health_state', 'unknown'),
-                confidence=classification.get('confidence', 0.0),
-                all_probabilities=classification.get('probabilities', {}),
-                explanation=result.get('explanation', '')
+                failure_type=pred.get('failure_type', 'unknown'),
+                confidence=float(pred.get('confidence', 0.0) or 0.0),
+                failure_probability=float(pred.get('failure_probability', 0.0) or 0.0),
+                all_probabilities=pred.get('all_probabilities', {}) or {},
+                explanation=explanation_text or '',
             )
         except Exception as e:
             logger.error(f"Classification prediction failed: {e}")
@@ -398,7 +454,7 @@ class MLManager:
     def predict_rul(
         self, 
         machine_id: str, 
-        sensor_data: Dict[str, float]
+        sensor_data: Optional[Dict[str, float]]
     ) -> RULResult:
         """
         Run Remaining Useful Life prediction for a machine
@@ -420,8 +476,12 @@ class MLManager:
                 "ML predictions are disabled. Check server logs for details."
             )
         
-        if machine_id not in self.machine_metadata:
-            raise ValueError(f"Machine not found: {machine_id}")
+        # Allow predictions even if GAN metadata is missing, as long as model artifacts exist.
+        regression_path = self.models_dir / "regression" / machine_id
+        if not self._has_model_artifacts(regression_path):
+            raise FileNotFoundError(
+                f"RUL model not found or empty for {machine_id}. Expected: {regression_path}"
+            )
         
         logger.info(f"Running RUL prediction for {machine_id}")
         
@@ -433,11 +493,19 @@ class MLManager:
                 model_type='regression'
             )
             
-            # Extract RUL results
-            pred = result.get('prediction', {})
-            rul = pred.get('rul', {})
-            
-            rul_hours = rul.get('predicted_rul', 0.0)
+            regression_block = result.get('regression', {}) if isinstance(result, dict) else {}
+            if isinstance(regression_block, dict) and regression_block.get('error'):
+                raise RuntimeError(regression_block.get('error'))
+
+            pred = regression_block.get('prediction', {}) if isinstance(regression_block, dict) else {}
+            explanation_block = regression_block.get('explanation', {}) if isinstance(regression_block, dict) else {}
+            explanation_text = (
+                explanation_block.get('summary')
+                if isinstance(explanation_block, dict)
+                else (regression_block.get('explanation') if isinstance(regression_block, dict) else '')
+            )
+
+            rul_hours = float(pred.get('rul_hours', 0.0) or 0.0)
             rul_days = rul_hours / 24.0
             
             # Determine urgency
@@ -455,8 +523,8 @@ class MLManager:
                 rul_hours=rul_hours,
                 rul_days=round(rul_days, 2),
                 urgency=urgency,
-                confidence=rul.get('confidence', 0.0),
-                explanation=result.get('explanation', '')
+                confidence=float(pred.get('confidence', 0.0) or 0.0),
+                explanation=explanation_text or ''
             )
         except Exception as e:
             logger.error(f"RUL prediction failed: {e}")

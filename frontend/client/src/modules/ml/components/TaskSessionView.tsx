@@ -1,9 +1,18 @@
 import { Box, Chip, Divider, LinearProgress, Paper, Stack, Typography } from '@mui/material';
 
 import { useTaskSession } from '../context/TaskSessionContext';
+import { useDashboard } from '../context/DashboardContext';
 
 export default function TaskSessionView() {
-  const { runningTasks, completedTasks } = useTaskSession();
+  const { runningTasks, completedTasks, focusTask } = useTaskSession();
+  const { setSelectedView, setSelectedMachineId } = useDashboard();
+
+  const openTask = (t: { task_id: string; machine_id: string; kind: 'gan' | 'ml_train' }) => {
+    focusTask(t.task_id);
+    // Keep dashboard machine in sync when we can.
+    setSelectedMachineId(t.machine_id || null);
+    setSelectedView(t.kind === 'ml_train' ? 'training' : 'gan');
+  };
 
   return (
     <Box>
@@ -49,10 +58,21 @@ export default function TaskSessionView() {
               {runningTasks.map((t) => (
                 <Paper
                   key={t.task_id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => openTask(t)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      openTask(t);
+                    }
+                  }}
                   sx={{
                     p: 2,
                     bgcolor: 'rgba(255, 255, 255, 0.02)',
                     border: '1px solid rgba(255, 255, 255, 0.08)',
+                    cursor: 'pointer',
+                    '&:hover': { borderColor: 'rgba(102, 126, 234, 0.55)' },
                   }}
                 >
                   <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={1}>
@@ -95,10 +115,21 @@ export default function TaskSessionView() {
               {completedTasks.map((t) => (
                 <Paper
                   key={t.task_id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => openTask(t)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      openTask(t);
+                    }
+                  }}
                   sx={{
                     p: 2,
                     bgcolor: 'rgba(255, 255, 255, 0.02)',
                     border: '1px solid rgba(255, 255, 255, 0.08)',
+                    cursor: 'pointer',
+                    '&:hover': { borderColor: 'rgba(102, 126, 234, 0.55)' },
                   }}
                 >
                   <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={1}>

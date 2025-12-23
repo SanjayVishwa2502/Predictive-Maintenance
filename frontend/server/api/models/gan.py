@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import List, Dict, Optional, Any
 from datetime import datetime
 from enum import Enum
+from typing import Literal
 
 
 # ============================================================================
@@ -40,6 +41,28 @@ class FileFormat(str, Enum):
     YAML = "yaml"
     EXCEL = "excel"
     CSV = "csv"
+
+
+# ============================================================================
+# WORKFLOW CONTINUATION (Persisted in backend)
+# ============================================================================
+
+
+class ContinueWorkflowState(BaseModel):
+    """Persisted client workflow state used by 'Continue Workflow' UX."""
+
+    workflow: Literal["gan_profile"] = Field(
+        default="gan_profile",
+        description="Workflow identifier (GAN new profile workflow).",
+    )
+    machine_id: str = Field(..., min_length=1, description="Machine id to resume")
+    current_step: int = Field(0, ge=0, le=3, description="Workflow step index (0-3)")
+    updated_at: Optional[datetime] = Field(default=None, description="Server timestamp of last update")
+
+
+class ContinueWorkflowResponse(BaseModel):
+    has_state: bool = Field(..., description="Whether a saved workflow exists")
+    state: Optional[ContinueWorkflowState] = Field(default=None)
 
 
 # ============================================================================

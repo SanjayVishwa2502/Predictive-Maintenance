@@ -50,6 +50,7 @@ import type {
 interface WorkflowStepperProps {
   machineId: string;
   onBackToList: () => void;
+  initialStep?: number;
 }
 
 type LossPoint = { epoch: number; loss: number };
@@ -122,7 +123,7 @@ function makeIllustrativeSeedSeries(points = 80, sensorCount = 3) {
   });
 }
 
-export default function WorkflowStepper({ machineId, onBackToList }: WorkflowStepperProps) {
+export default function WorkflowStepper({ machineId, onBackToList, initialStep }: WorkflowStepperProps) {
   const { registerRunningTask, updateTaskFromStatus } = useTaskSession();
   const [currentStep, setCurrentStep] = useState(0);
 
@@ -200,7 +201,7 @@ export default function WorkflowStepper({ machineId, onBackToList }: WorkflowSte
 
   useEffect(() => {
     refreshMachineDetails();
-    setCurrentStep(0);
+    setCurrentStep(typeof initialStep === 'number' && Number.isFinite(initialStep) ? Math.max(0, Math.min(3, Math.floor(initialStep))) : 0);
 
     setSeedResult(null);
     setSeedError(null);
@@ -220,6 +221,30 @@ export default function WorkflowStepper({ machineId, onBackToList }: WorkflowSte
     setVizSummary(null);
     setVizError(null);
   }, [machineId]);
+
+  // Persist workflow continuation state so it survives page refresh/navigation.
+  useEffect(() => {
+    (async () => {
+      try {
+        await ganApi.setContinueWorkflow({ workflow: 'gan_profile', machine_id: machineId, current_step: currentStep });
+      } catch {
+        // Best-effort; don't block the workflow UI if persistence fails.
+      }
+    })();
+  }, [machineId, currentStep]);
+
+  // If validation succeeds, consider the workflow complete and clear the continuation marker.
+  useEffect(() => {
+    if (!validationResult) return;
+    if (!validationResult.valid) return;
+    (async () => {
+      try {
+        await ganApi.clearContinueWorkflow();
+      } catch {
+        // best-effort
+      }
+    })();
+  }, [validationResult]);
 
   // Poll training task status (Celery) if we have an active task
   useEffect(() => {
@@ -297,7 +322,7 @@ export default function WorkflowStepper({ machineId, onBackToList }: WorkflowSte
     try {
       const resp = await ganApi.trainModel(machineId, trainingRequest);
       setTrainingStart(resp);
-      registerRunningTask({ task_id: resp.task_id, machine_id: machineId, kind: 'train' });
+      registerRunningTask({ task_id: resp.task_id, machine_id: machineId, kind: 'gan' });
       await refreshMachineDetails();
     } catch (e: any) {
       setTrainingError(e?.response?.data?.detail || e?.message || 'Failed to start training');

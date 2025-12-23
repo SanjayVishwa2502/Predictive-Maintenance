@@ -233,7 +233,7 @@ export default function GANWorkflowStepper({ machineId, onBackToList }: GANWorkf
     try {
       const resp = await ganApi.trainModel(machineId, trainingRequest);
       setTrainingStart(resp);
-      registerRunningTask({ task_id: resp.task_id, machine_id: machineId, kind: 'train' });
+      registerRunningTask({ task_id: resp.task_id, machine_id: machineId, kind: 'gan' });
       await refreshMachineDetails();
     } catch (e: any) {
       setTrainingError(e?.response?.data?.detail || e?.message || 'Failed to start training');

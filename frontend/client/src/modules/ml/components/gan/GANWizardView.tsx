@@ -7,7 +7,7 @@
  * - Tab-based navigation between upload and list
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Box,
   Tabs,
@@ -48,12 +48,14 @@ function TabPanel({ children, value, index }: TabPanelProps) {
 
 interface GANWizardViewProps {
   onBack?: () => void;
+  resumeState?: { machine_id: string; current_step: number } | null;
 }
 
-export default function GANWizardView({ onBack }: GANWizardViewProps) {
+export default function GANWizardView({ onBack, resumeState }: GANWizardViewProps) {
   const [currentTab, setCurrentTab] = useState(0);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [selectedMachineId, setSelectedMachineId] = useState<string | null>(null);
+  const [resumeStep, setResumeStep] = useState<number>(0);
 
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     setCurrentTab(newValue);
@@ -71,10 +73,23 @@ export default function GANWizardView({ onBack }: GANWizardViewProps) {
     setSelectedMachineId(machineId);
   };
 
+  useEffect(() => {
+    const mid = String(resumeState?.machine_id || '').trim();
+    if (!mid) return;
+
+    const step = typeof resumeState?.current_step === 'number' && Number.isFinite(resumeState.current_step)
+      ? Math.max(0, Math.min(3, Math.floor(resumeState.current_step)))
+      : 0;
+
+    setResumeStep(step);
+    setSelectedMachineId(mid);
+  }, [resumeState?.machine_id, resumeState?.current_step]);
+
   if (selectedMachineId) {
     return (
       <WorkflowStepper
         machineId={selectedMachineId}
+        initialStep={resumeState?.machine_id === selectedMachineId ? resumeStep : 0}
         onBackToList={() => setSelectedMachineId(null)}
       />
     );

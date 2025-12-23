@@ -73,6 +73,7 @@ celery_app.conf.update(
 # Auto-discovery doesn't work reliably on Windows
 import tasks.test_task  # noqa
 import tasks.gan_tasks  # noqa
+import tasks.ml_training_tasks  # noqa
 
 logger.info(f"Celery app configured with broker: {settings.CELERY_BROKER_URL}")
 logger.info(f"Result backend: {settings.CELERY_RESULT_BACKEND}")

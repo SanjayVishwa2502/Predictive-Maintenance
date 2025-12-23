@@ -33,6 +33,36 @@ import type {
 // Get API base URL from environment
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
+function getClientId(): string {
+  // A stable, per-browser identifier so the backend can persist/restore workflow state across refreshes.
+  const key = 'pm_client_id';
+  try {
+    const existing = window.localStorage.getItem(key);
+    if (existing && existing.trim()) return existing;
+
+    const generated = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `pm_${Math.random().toString(16).slice(2)}_${Date.now()}`;
+    window.localStorage.setItem(key, generated);
+    return generated;
+  } catch {
+    // If storage is blocked, fall back to a best-effort id (won't persist).
+    return `pm_${Math.random().toString(16).slice(2)}_${Date.now()}`;
+  }
+}
+
+type ContinueWorkflowState = {
+  workflow: 'gan_profile';
+  machine_id: string;
+  current_step: number;
+  updated_at?: string;
+};
+
+type ContinueWorkflowResponse = {
+  has_state: boolean;
+  state: ContinueWorkflowState | null;
+};
+
 /**
  * GAN API Client
  */
@@ -267,6 +297,31 @@ export const ganApi = {
       request
     );
     return response.data;
+  },
+
+  // ========== WORKFLOW: CONTINUE (PERSISTED) ==========
+
+  getContinueWorkflow: async (): Promise<ContinueWorkflowResponse> => {
+    const resp: AxiosResponse<ContinueWorkflowResponse> = await axios.get(
+      `${API_BASE}/api/gan/workflow/continue`,
+      { headers: { 'X-PM-Client-Id': getClientId() } }
+    );
+    return resp.data;
+  },
+
+  setContinueWorkflow: async (state: { workflow: 'gan_profile'; machine_id: string; current_step: number }): Promise<void> => {
+    await axios.put(
+      `${API_BASE}/api/gan/workflow/continue`,
+      state,
+      { headers: { 'X-PM-Client-Id': getClientId() } }
+    );
+  },
+
+  clearContinueWorkflow: async (): Promise<void> => {
+    await axios.delete(
+      `${API_BASE}/api/gan/workflow/continue`,
+      { headers: { 'X-PM-Client-Id': getClientId() } }
+    );
   },
 
   // ========== WORKFLOW: TVAE TRAINING ==========

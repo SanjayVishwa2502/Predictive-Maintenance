@@ -3,6 +3,8 @@ import { createContext, useContext, useMemo, useState } from 'react';
 export type DashboardView =
   | 'predictions'
   | 'gan'
+  | 'training'
+  | 'models'
   | 'history'
   | 'reports'
   | 'tasks'
