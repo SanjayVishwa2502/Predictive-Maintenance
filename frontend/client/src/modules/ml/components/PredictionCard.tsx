@@ -36,6 +36,7 @@ import {
   AccessTime as AccessTimeIcon,
   Refresh as RefreshIcon,
 } from '@mui/icons-material';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { useState, useEffect, useMemo } from 'react';
 
 // ============================================================================
@@ -51,6 +52,13 @@ export interface PredictionCardProps {
   onViewHistory?: () => void;
   autoRefresh?: boolean;
   refreshInterval?: number; // seconds
+
+  // Optional: text-output mode (LLM explanation summary)
+  // If provided, the card will render this text output panel instead of the full prediction/status UI.
+  textOutput?: string;
+  textOutputLoading?: boolean;
+  textOutputError?: string | null;
+  textOutputRefreshSeconds?: number;
 }
 
 export interface PredictionResult {
@@ -190,6 +198,7 @@ const formatFailureType = (type: string): string => {
 // ============================================================================
 
 export default function PredictionCard({
+  machineId,
   prediction,
   loading,
   onRunPrediction,
@@ -197,8 +206,121 @@ export default function PredictionCard({
   onViewHistory,
   autoRefresh = false,
   refreshInterval = 30,
+  textOutput,
+  textOutputLoading,
+  textOutputError,
+  textOutputRefreshSeconds,
 }: PredictionCardProps) {
   const [countdown, setCountdown] = useState(refreshInterval);
+
+  const isTextMode =
+    typeof textOutput !== 'undefined' ||
+    typeof textOutputLoading !== 'undefined' ||
+    typeof textOutputError !== 'undefined' ||
+    typeof textOutputRefreshSeconds !== 'undefined';
+
+  if (isTextMode) {
+    const displayText = (textOutput || '').trim();
+    const isBusy = Boolean(textOutputLoading);
+
+    const handleCopy = async () => {
+      const txt = displayText;
+      if (!txt) return;
+      try {
+        await navigator.clipboard.writeText(txt);
+      } catch {
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = txt;
+          ta.style.position = 'fixed';
+          ta.style.left = '-10000px';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        } catch {
+          // ignore
+        }
+      }
+    };
+
+    return (
+      <Card
+        sx={{
+          background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.8) 0%, rgba(17, 24, 39, 0.8) 100%)',
+          backdropFilter: 'blur(10px)',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          borderRadius: 2,
+          mb: 3,
+        }}
+      >
+        <CardHeader
+          title={
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
+              <Typography variant="h6" sx={{ color: '#e5e7eb', fontWeight: 600 }}>
+                Prediction Output
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<ContentCopyIcon />}
+                  onClick={handleCopy}
+                  disabled={!displayText}
+                  sx={{ textTransform: 'none' }}
+                >
+                  Copy
+                </Button>
+                <Button
+                  size="small"
+                  variant="contained"
+                  startIcon={<PlayArrowIcon />}
+                  onClick={onRunPrediction}
+                  disabled={isBusy || Boolean(loading)}
+                  sx={{ textTransform: 'none' }}
+                >
+                  Prediction
+                </Button>
+              </Box>
+            </Box>
+          }
+          subheader={
+            <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+              Machine: {machineId}
+            </Typography>
+          }
+          sx={{
+            '& .MuiCardHeader-content': { overflow: 'hidden' },
+            pb: 0,
+          }}
+        />
+        <CardContent>
+          {textOutputError && (
+            <Typography variant="body2" sx={{ color: '#fca5a5', mb: 1 }}>
+              {textOutputError}
+            </Typography>
+          )}
+
+          <Box
+            sx={{
+              minHeight: 220,
+              p: 2,
+              borderRadius: 2,
+              bgcolor: 'rgba(0, 0, 0, 0.2)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              overflow: 'auto',
+              whiteSpace: 'pre-wrap',
+              color: '#e5e7eb',
+              fontSize: 14,
+              lineHeight: 1.6,
+            }}
+          >
+            {isBusy ? 'Generating explanation…' : displayText || 'Waiting for explanation…'}
+          </Box>
+        </CardContent>
+      </Card>
+    );
+  }
 
   // Auto-refresh countdown timer
   useEffect(() => {

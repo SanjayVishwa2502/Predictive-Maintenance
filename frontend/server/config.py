@@ -66,6 +66,11 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
+    # Prediction history audit (CSV)
+    # Stores snapshots/runs/LLM updates to a machine-specific CSV for permanent offline usage.
+    AUDIT_CSV_ENABLED: bool = True
+    AUDIT_CSV_DIR: str = "reports/audit_csv"
+
 
 # Singleton settings instance
 settings = Settings()

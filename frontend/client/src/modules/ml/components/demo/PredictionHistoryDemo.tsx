@@ -145,8 +145,8 @@ export default function PredictionHistoryDemo() {
       degrading: degradingCount,
       warning: warningCount,
       critical: criticalCount,
-      avgConfidence: (predictions.reduce((sum, p) => sum + p.confidence, 0) / predictions.length * 100).toFixed(1),
-      avgRUL: (predictions.reduce((sum, p) => sum + p.rul_hours, 0) / predictions.length).toFixed(1),
+      avgConfidence: (predictions.reduce((sum, p) => sum + (p.confidence ?? 0), 0) / predictions.length * 100).toFixed(1),
+      avgRUL: (predictions.reduce((sum, p) => sum + (p.rul_hours ?? 0), 0) / predictions.length).toFixed(1),
     };
   }, [predictions]);
 

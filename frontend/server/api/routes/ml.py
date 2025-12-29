@@ -6,8 +6,9 @@ REST API endpoints for ML predictions and machine monitoring
 Integrates with MLManager service for model inference
 """
 from fastapi import APIRouter, HTTPException, Query, Path, Depends
+from fastapi.responses import FileResponse
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 
 from ..models.ml import (
@@ -34,6 +35,10 @@ from ..models.ml import (
     DeleteModelResponse,
     DeleteAllModelsResponse,
     ModelType,
+    AnomalyResponse,
+    AnomalyPrediction,
+    TimeSeriesResponse,
+    TimeSeriesPrediction,
 )
 import shutil
 import json as jsonlib
@@ -43,6 +48,10 @@ import sys
 from pathlib import Path as PathLib
 sys.path.append(str(PathLib(__file__).resolve().parents[2]))
 from services.ml_manager import ml_manager
+from services.sensor_simulator import get_simulator
+from services.history_store import add_snapshot, list_snapshots, list_runs, get_run
+from services.auto_prediction_runner import auto_prediction_runner
+from services.audit_csv import list_datasets, latest_dataset_path
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -114,7 +123,6 @@ def _compute_model_status(model_type: str, machine_id: str) -> ModelArtifactStat
             status="available",
             model_dir=str(model_path),
             report_path=str(report_path),
-            issues=[],
         )
 
     return ModelArtifactStatus(
@@ -138,6 +146,8 @@ def _discover_machine_ids_from_models() -> set[str]:
                     machine_ids.add(entry.name)
         except Exception:
             continue
+
+
     return machine_ids
 
 
@@ -176,6 +186,8 @@ async def model_inventory():
 
         machine_ids = set(m.machine_id for m in machines_from_manager)
         machine_ids.update(_discover_machine_ids_from_models())
+
+
         machine_ids.update(_discover_machine_ids_from_synthetic_data())
 
         machines: list[MachineModelInventory] = []
@@ -397,17 +409,53 @@ async def get_machine_status(
         if machine_info is None:
             raise HTTPException(status_code=404, detail=f"Machine not found: {machine_id}")
         
-        # For now, return basic status (real-time sensor data to be implemented)
-        from dataclasses import asdict
+        # Get sensor simulator
+        simulator = get_simulator()
+
+        # Auto-start simulation for machines that have validation data.
+        # This keeps the UI simple for testing: selecting a machine immediately shows live readings.
+        is_running = simulator.is_running(machine_id)
+        if not is_running:
+            try:
+                # Start only if dataset exists; start_simulation returns False when missing.
+                if simulator.start_simulation(machine_id):
+                    is_running = True
+                    logger.info(f"[OK] Auto-started sensor simulation for {machine_id}")
+            except Exception as e:
+                # Never fail the status endpoint due to simulation issues.
+                logger.warning(f"Auto-start simulation failed for {machine_id}: {e}")
+
+        latest_sensors: dict = {}
+        if is_running:
+            sensor_data = simulator.get_current_readings(machine_id)
+            if sensor_data:
+                latest_sensors = sensor_data
+                logger.debug(
+                    f"Returning simulated sensor data for {machine_id}: {len(latest_sensors)} sensors"
+                )
+        
         status = {
             "machine_id": machine_id,
-            "is_running": False,  # To be implemented with real sensor data
-            "latest_sensors": {},
-            "last_update": datetime.now(),  # Use current time instead of None
-            "sensor_count": max(machine_info.sensor_count, 1)  # Ensure at least 1
+            "is_running": is_running,
+            "latest_sensors": latest_sensors,
+            "last_update": datetime.now(),
+            "sensor_count": len(latest_sensors) if latest_sensors else machine_info.sensor_count
         }
+
+        # Store the 5-second datapoints for history. Best-effort only.
+        if latest_sensors:
+            try:
+                stamp = status["last_update"].astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+                await add_snapshot(
+                    machine_id=machine_id,
+                    sensor_data=latest_sensors,
+                    data_stamp=stamp,
+                )
+                status["data_stamp"] = stamp
+            except Exception as e:
+                logger.debug(f"Snapshot persistence skipped for {machine_id}: {e}")
         
-        logger.info(f"[OK] Status retrieved for {machine_id} ({status['sensor_count']} sensors)")
+        logger.info(f"[OK] Status retrieved for {machine_id} (running: {is_running}, {status['sensor_count']} sensors)")
         
         return MachineStatusResponse(**status)
         
@@ -423,6 +471,174 @@ async def get_machine_status(
             status_code=500,
             detail=f"Failed to retrieve machine status: {str(e)}"
         )
+
+
+# ============================================================
+# Snapshot + Run History (Persisted)
+# ============================================================
+
+
+@router.get(
+    "/machines/{machine_id}/audit/datasets",
+    summary="List prediction-history datasets (CSV)",
+    description="Return a list of CSV audit datasets captured for this machine (session-scoped).",
+)
+async def get_audit_datasets(
+    machine_id: str = Path(..., description="Machine identifier"),
+):
+    try:
+        return {"machine_id": machine_id, "datasets": list_datasets(machine_id)}
+    except Exception as e:
+        logger.error(f"Failed to list audit datasets for {machine_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to list datasets: {str(e)}")
+
+
+@router.get(
+    "/machines/{machine_id}/audit/datasets/latest",
+    summary="Download latest prediction-history dataset (CSV)",
+    description="Download the most recent CSV audit dataset for this machine.",
+)
+async def download_latest_audit_dataset(
+    machine_id: str = Path(..., description="Machine identifier"),
+):
+    try:
+        p = latest_dataset_path(machine_id)
+        if not p or not p.exists():
+            raise HTTPException(status_code=404, detail="No audit dataset found")
+        return FileResponse(
+            path=str(p),
+            filename=p.name,
+            media_type="text/csv",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to download audit dataset for {machine_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to download dataset: {str(e)}")
+
+
+@router.get(
+    "/machines/{machine_id}/snapshots",
+    summary="List stored sensor snapshots",
+    description="Return stored 5-second sensor snapshots for a machine (newest first).",
+)
+async def get_machine_snapshots(
+    machine_id: str = Path(..., description="Machine identifier"),
+    limit: int = Query(500, ge=1, le=5000, description="Max snapshots to return"),
+):
+    try:
+        return {
+            "machine_id": machine_id,
+            "snapshots": await list_snapshots(machine_id, limit=limit),
+        }
+    except Exception as e:
+        logger.error(f"Failed to list snapshots for {machine_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to list snapshots: {str(e)}")
+
+
+@router.get(
+    "/machines/{machine_id}/runs",
+    summary="List prediction runs",
+    description="Return stored prediction runs for a machine (newest first).",
+)
+async def get_machine_runs(
+    machine_id: str = Path(..., description="Machine identifier"),
+    limit: int = Query(200, ge=1, le=2000, description="Max runs to return"),
+):
+    try:
+        return {
+            "machine_id": machine_id,
+            "runs": await list_runs(machine_id, limit=limit),
+        }
+    except Exception as e:
+        logger.error(f"Failed to list runs for {machine_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to list runs: {str(e)}")
+
+
+@router.get(
+    "/runs/{run_id}",
+    summary="Get prediction run details",
+    description="Return full stored details (snapshot, predictions, LLM outputs) for a run_id.",
+)
+async def get_run_details(
+    run_id: str = Path(..., description="Run ID"),
+):
+    try:
+        run = await get_run(run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
+        return run
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to fetch run details for {run_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch run details: {str(e)}")
+
+
+# ============================================================
+# Backend Auto-Run (150s Trigger)
+# ============================================================
+
+
+@router.post(
+    "/machines/{machine_id}/auto/start",
+    summary="Start backend auto prediction+LLM",
+    description="Register a machine for backend-side auto runs (default 150 seconds).",
+)
+async def start_auto_runs(
+    machine_id: str = Path(..., description="Machine identifier"),
+    interval_seconds: int = Query(150, ge=30, le=3600, description="Interval in seconds"),
+    client_id: str = Query("", description="Dashboard client id for WS push updates"),
+):
+    try:
+        return await auto_prediction_runner.start(machine_id, interval_seconds=interval_seconds, client_id=client_id)
+    except Exception as e:
+        logger.error(f"Failed to start auto runs for {machine_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to start auto runs: {str(e)}")
+
+
+@router.post(
+    "/machines/{machine_id}/auto/stop",
+    summary="Stop backend auto prediction+LLM",
+)
+async def stop_auto_runs(
+    machine_id: str = Path(..., description="Machine identifier"),
+):
+    try:
+        return await auto_prediction_runner.stop(machine_id)
+    except Exception as e:
+        logger.error(f"Failed to stop auto runs for {machine_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to stop auto runs: {str(e)}")
+
+
+@router.get(
+    "/machines/{machine_id}/auto/status",
+    summary="Get backend auto-run status",
+)
+async def auto_runs_status(
+    machine_id: str = Path(..., description="Machine identifier"),
+):
+    try:
+        return auto_prediction_runner.status(machine_id)
+    except Exception as e:
+        logger.error(f"Failed to get auto status for {machine_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get auto status: {str(e)}")
+
+
+@router.post(
+    "/machines/{machine_id}/auto/run_once",
+    summary="Run one prediction+LLM cycle now",
+    description="Immediately create a run (uses latest snapshot) and enqueue LLM tasks.",
+)
+async def auto_run_once(
+    machine_id: str = Path(..., description="Machine identifier"),
+    client_id: str = Query("", description="Dashboard client id for WS push updates"),
+):
+    try:
+        return await auto_prediction_runner.run_once(machine_id, client_id=client_id)
+    except Exception as e:
+        logger.error(f"Failed to run once for {machine_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to run once: {str(e)}")
 
 
 # ============================================================
@@ -591,7 +807,7 @@ async def predict_rul(request: PredictionRequest):
                 risk_factors=[],
                 recommendations=["Schedule maintenance inspection"]
             ),
-            timestamp=datetime.fromisoformat(result['timestamp'].replace('Z', '+00:00'))
+            timestamp=datetime.fromisoformat(result.timestamp.replace('Z', '+00:00')) if result.timestamp else datetime.now()
         )
         
         return response
@@ -614,6 +830,128 @@ async def predict_rul(request: PredictionRequest):
             status_code=500,
             detail=f"RUL prediction failed: {str(e)}"
         )
+
+
+# ============================================================
+# Endpoint 4b: Run Anomaly Detection
+# ============================================================
+
+
+@router.post(
+    "/predict/anomaly",
+    response_model=AnomalyResponse,
+    summary="Run Anomaly Detection",
+    description="""
+    Run anomaly detection for a single machine.
+
+    Notes:
+    - This endpoint returns prediction-only results quickly.
+    - LLM explanations should be generated asynchronously via /api/llm/explain.
+    """,
+    responses={
+        200: {"description": "Anomaly detection completed successfully"},
+        400: {"model": ErrorResponse, "description": "Invalid request"},
+        404: {"model": ErrorResponse, "description": "Machine or model not found"},
+        500: {"model": ErrorResponse, "description": "Prediction failed"},
+    },
+)
+async def predict_anomaly(request: PredictionRequest):
+    try:
+        logger.info(f"Running anomaly detection for {request.machine_id}")
+
+        result = ml_manager.predict_anomaly(machine_id=request.machine_id, sensor_data=request.sensor_data)
+
+        response = AnomalyResponse(
+            machine_id=result.machine_id,
+            prediction=AnomalyPrediction(
+                is_anomaly=result.is_anomaly,
+                anomaly_score=result.anomaly_score,
+                detection_method=result.detection_method,
+                abnormal_sensors=result.abnormal_sensors,
+            ),
+            explanation=ExplanationInfo(
+                summary=(
+                    "Anomaly detected." if result.is_anomaly else "No anomaly detected."
+                ),
+                risk_factors=[],
+                recommendations=["Continue monitoring"],
+            ),
+            timestamp=datetime.fromisoformat(result.timestamp.replace("Z", "+00:00"))
+            if getattr(result, "timestamp", None)
+            else datetime.now(),
+        )
+
+        return response
+
+    except ValueError as e:
+        logger.error(f"Invalid request: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid request: {str(e)}")
+    except FileNotFoundError as e:
+        logger.error(f"Machine or model not found: {e}")
+        raise HTTPException(status_code=404, detail=f"Machine '{request.machine_id}' or model not found")
+    except Exception as e:
+        logger.error(f"Anomaly prediction failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
+
+
+# ============================================================
+# Endpoint 4c: Run Time-series Forecast
+# ============================================================
+
+
+@router.post(
+    "/predict/timeseries",
+    response_model=TimeSeriesResponse,
+    summary="Run Time-series Forecast",
+    description="""
+    Run time-series forecasting for a single machine.
+
+    Notes:
+    - This endpoint returns prediction-only results quickly.
+    - LLM explanations should be generated asynchronously via /api/llm/explain.
+    """,
+    responses={
+        200: {"description": "Forecast generated successfully"},
+        400: {"model": ErrorResponse, "description": "Invalid request"},
+        404: {"model": ErrorResponse, "description": "Machine or model not found"},
+        500: {"model": ErrorResponse, "description": "Prediction failed"},
+    },
+)
+async def predict_timeseries(request: PredictionRequest):
+    try:
+        logger.info(f"Running timeseries forecast for {request.machine_id}")
+
+        result = ml_manager.predict_timeseries(machine_id=request.machine_id, sensor_data=request.sensor_data)
+
+        response = TimeSeriesResponse(
+            machine_id=result.machine_id,
+            prediction=TimeSeriesPrediction(
+                forecast_summary=result.forecast_summary,
+                confidence=result.confidence,
+                forecast_horizon=result.forecast_horizon,
+                forecasts=result.forecasts,
+            ),
+            explanation=ExplanationInfo(
+                summary="Forecast generated.",
+                risk_factors=[],
+                recommendations=["Continue monitoring"],
+            ),
+            timestamp=datetime.fromisoformat(result.timestamp.replace("Z", "+00:00"))
+            if getattr(result, "timestamp", None)
+            else datetime.now(),
+        )
+
+        return response
+
+    except ValueError as e:
+        logger.error(f"Invalid request: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid request: {str(e)}")
+    except FileNotFoundError as e:
+        logger.error(f"Machine or model not found: {e}")
+        raise HTTPException(status_code=404, detail=f"Machine '{request.machine_id}' or model not found")
+    except Exception as e:
+        logger.error(f"Timeseries prediction failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
 
 
 # ============================================================
@@ -765,6 +1103,234 @@ async def health_check():
             gpu_info=None,
             integrated_system_ready=False,
             timestamp=datetime.utcnow()
+        )
+
+
+# ============================================================
+# Sensor Simulation Control Endpoints
+# ============================================================
+
+@router.post(
+    "/simulation/start/{machine_id}",
+    summary="Start Sensor Simulation",
+    description="""
+    Start simulated sensor data streaming for a machine.
+    
+    Reads from validation dataset (val.parquet) and iterates through rows
+    to simulate real-time sensor readings. Each call to /machines/{machine_id}/status
+    will return the next row of data.
+    
+    **Parameters:**
+    - machine_id: Machine identifier
+    
+    **Returns:**
+    - Success status and simulation details
+    """,
+    responses={
+        200: {"description": "Simulation started successfully"},
+        404: {"description": "Machine or validation dataset not found"},
+        500: {"description": "Failed to start simulation"}
+    }
+)
+async def start_simulation(
+    machine_id: str = Path(..., description="Machine identifier")
+):
+    """Start sensor data simulation for a machine"""
+    try:
+        simulator = get_simulator()
+        
+        # Check if machine exists
+        machine_info = ml_manager.get_machine_info(machine_id)
+        if machine_info is None:
+            raise HTTPException(status_code=404, detail=f"Machine not found: {machine_id}")
+        
+        # Start simulation
+        success = simulator.start_simulation(machine_id)
+        
+        if not success:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Validation dataset not found for {machine_id}"
+            )
+        
+        # Get initial status
+        status = simulator.get_simulation_status(machine_id)
+        
+        logger.info(f"[OK] Started simulation for {machine_id}")
+        
+        return {
+            "success": True,
+            "message": f"Simulation started for {machine_id}",
+            "simulation": status
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to start simulation: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to start simulation: {str(e)}"
+        )
+
+
+@router.post(
+    "/simulation/stop/{machine_id}",
+    summary="Stop Sensor Simulation",
+    description="""
+    Stop simulated sensor data streaming for a machine.
+    
+    **Parameters:**
+    - machine_id: Machine identifier
+    
+    **Returns:**
+    - Success status
+    """,
+    responses={
+        200: {"description": "Simulation stopped successfully"},
+        404: {"description": "No active simulation for machine"}
+    }
+)
+async def stop_simulation(
+    machine_id: str = Path(..., description="Machine identifier")
+):
+    """Stop sensor data simulation for a machine"""
+    try:
+        simulator = get_simulator()
+        
+        success = simulator.stop_simulation(machine_id)
+        
+        if not success:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No active simulation for {machine_id}"
+            )
+        
+        logger.info(f"[OK] Stopped simulation for {machine_id}")
+        
+        return {
+            "success": True,
+            "message": f"Simulation stopped for {machine_id}"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to stop simulation: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to stop simulation: {str(e)}"
+        )
+
+
+@router.get(
+    "/simulation/status/{machine_id}",
+    summary="Get Simulation Status",
+    description="""
+    Get current simulation status for a machine.
+    
+    **Parameters:**
+    - machine_id: Machine identifier
+    
+    **Returns:**
+    - Simulation status including current row, progress, and sensor count
+    """,
+    responses={
+        200: {"description": "Status retrieved successfully"},
+        404: {"description": "No active simulation for machine"}
+    }
+)
+async def get_simulation_status(
+    machine_id: str = Path(..., description="Machine identifier")
+):
+    """Get simulation status for a machine"""
+    try:
+        simulator = get_simulator()
+        
+        status = simulator.get_simulation_status(machine_id)
+        
+        if status is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No active simulation for {machine_id}"
+            )
+        
+        return status
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get simulation status: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get simulation status: {str(e)}"
+        )
+
+
+@router.get(
+    "/simulation/active",
+    summary="List Active Simulations",
+    description="""
+    Get list of all machines with active simulations.
+    
+    **Returns:**
+    - List of machine IDs with running simulations
+    """,
+    responses={
+        200: {"description": "Active simulations retrieved successfully"}
+    }
+)
+async def list_active_simulations():
+    """List all active simulations"""
+    try:
+        simulator = get_simulator()
+        active = simulator.get_active_simulations()
+        
+        return {
+            "active_simulations": active,
+            "count": len(active)
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to list simulations: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to list simulations: {str(e)}"
+        )
+
+
+@router.post(
+    "/simulation/stop-all",
+    summary="Stop All Simulations",
+    description="""
+    Stop all active sensor simulations.
+    
+    **Returns:**
+    - Number of simulations stopped
+    """,
+    responses={
+        200: {"description": "All simulations stopped successfully"}
+    }
+)
+async def stop_all_simulations():
+    """Stop all active simulations"""
+    try:
+        simulator = get_simulator()
+        count = simulator.stop_all_simulations()
+        
+        logger.info(f"[OK] Stopped all simulations ({count} total)")
+        
+        return {
+            "success": True,
+            "message": f"Stopped {count} simulation(s)",
+            "count": count
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to stop all simulations: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to stop all simulations: {str(e)}"
         )
 
 

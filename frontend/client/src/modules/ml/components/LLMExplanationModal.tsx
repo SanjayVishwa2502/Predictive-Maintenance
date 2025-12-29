@@ -43,6 +43,8 @@ import {
 import ReactMarkdown from 'react-markdown';
 import { forwardRef } from 'react';
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+
 // ============================================================================
 // TYPESCRIPT INTERFACES
 // ============================================================================
@@ -94,7 +96,8 @@ const fetchExplanation = async (
   predictionData: PredictionData,
   apiEndpoint: string
 ): Promise<ExplanationResponse> => {
-  const response = await fetch(apiEndpoint, {
+  const explainUrl = apiEndpoint.startsWith('http') ? apiEndpoint : `${API_BASE_URL}${apiEndpoint}`;
+  const response = await fetch(explainUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -114,7 +117,46 @@ const fetchExplanation = async (
     throw new Error(`Failed to fetch explanation: ${response.statusText}`);
   }
 
-  return await response.json();
+  const startPayload = await response.json();
+
+  // Async mode: backend returns task_id immediately; we poll until SUCCESS.
+  if (startPayload && typeof startPayload.task_id === 'string') {
+    const taskId: string = startPayload.task_id;
+    const statusUrl = `${API_BASE_URL}/api/llm/explain/${encodeURIComponent(taskId)}`;
+
+    const startedAt = Date.now();
+    const maxWaitMs = 150_000; // ~2.5 minutes budget for CPU LLM
+
+    while (Date.now() - startedAt < maxWaitMs) {
+      // Wait 2 seconds between polls (keeps load low)
+      await new Promise((r) => setTimeout(r, 2000));
+
+      const statusResp = await fetch(statusUrl, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      if (!statusResp.ok) {
+        throw new Error(`Failed to poll explanation: ${statusResp.statusText}`);
+      }
+
+      const statusJson = await statusResp.json();
+      const status = statusJson?.status;
+
+      if (status === 'SUCCESS' && statusJson?.result) {
+        return statusJson.result as ExplanationResponse;
+      }
+
+      if (status === 'FAILURE') {
+        throw new Error(statusJson?.error || 'LLM explanation task failed');
+      }
+    }
+
+    throw new Error('LLM explanation timed out (CPU inference can take ~2 minutes).');
+  }
+
+  // Sync mode: backend returned the explanation directly.
+  return startPayload as ExplanationResponse;
 };
 
 const copyToClipboard = async (text: string): Promise<boolean> => {

@@ -35,9 +35,14 @@ const API_ENDPOINTS = {
   machineStatus: (id: string) => `${API_BASE_URL}/api/ml/machines/${id}/status`,
   predictClassification: `${API_BASE_URL}/api/ml/predict/classification`,
   predictRUL: `${API_BASE_URL}/api/ml/predict/rul`,
+  predictAnomaly: `${API_BASE_URL}/api/ml/predict/anomaly`,
+  predictTimeseries: `${API_BASE_URL}/api/ml/predict/timeseries`,
   predictionHistory: (id: string) => `${API_BASE_URL}/api/ml/machines/${id}/history`,
   health: `${API_BASE_URL}/api/ml/health`,
+  llmInfo: `${API_BASE_URL}/api/llm/info`,
 };
+
+// Text-output mode is manual-triggered (no auto-refresh).
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
@@ -86,6 +91,23 @@ import type { SensorReading } from '../modules/ml/components/SensorCharts';
 import type { HistoricalPrediction } from '../modules/ml/components/PredictionHistory';
 import type { PredictionResult as PredictionCardResult } from '../modules/ml/components/PredictionCard';
 
+type SnapshotHistoryRow = HistoricalPrediction;
+
+function getClientId(): string {
+  const key = 'pm_client_id';
+  try {
+    const existing = window.localStorage.getItem(key);
+    if (existing && existing.trim()) return existing;
+    const generated = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `pm_${Math.random().toString(16).slice(2)}_${Date.now()}`;
+    window.localStorage.setItem(key, generated);
+    return generated;
+  } catch {
+    return `pm_${Math.random().toString(16).slice(2)}_${Date.now()}`;
+  }
+}
+
 // ============================================================================
 // TYPESCRIPT INTERFACES
 // ============================================================================
@@ -124,17 +146,37 @@ function MLDashboardPageInner() {
   const [sensorData, setSensorData] = useState<Record<string, number> | null>(null);
   const [sensorHistory, setSensorHistory] = useState<SensorReading[]>([]);
   const [prediction, setPrediction] = useState<PredictionCardResult | null>(null);
-  const [predictionHistory, setPredictionHistory] = useState<HistoricalPrediction[]>([]);
+  const [predictionHistory, setPredictionHistory] = useState<SnapshotHistoryRow[]>([]);
+  const [selectedPredictionRunId, setSelectedPredictionRunId] = useState<string | null>(null);
+  const selectedPredictionRunIdRef = useRef<string | null>(null);
   const [showExplanation, setShowExplanation] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  // Text-only output (current UX focus)
+  const [textOutput, setTextOutput] = useState<string>('');
+  const [textOutputLoading, setTextOutputLoading] = useState(false);
+  const [textOutputError, setTextOutputError] = useState<string | null>(null);
+  const [machineSwitchLockRunId, setMachineSwitchLockRunId] = useState<string | null>(null);
+  const machineSwitchLockRunIdRef = useRef<string | null>(null);
+  const llmWsRef = useRef<WebSocket | null>(null);
+  const llmWsRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const [ganResumeState, setGanResumeState] = useState<{ machine_id: string; current_step: number } | null>(null);
+
+  useEffect(() => {
+    selectedPredictionRunIdRef.current = selectedPredictionRunId;
+  }, [selectedPredictionRunId]);
+
+  useEffect(() => {
+    machineSwitchLockRunIdRef.current = machineSwitchLockRunId;
+  }, [machineSwitchLockRunId]);
   
   // Day 19.1: Connection & polling state
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  // Treat "Online" as "backend reachable" (not browser Internet connectivity).
+  const [isOnline, setIsOnline] = useState(true);
   const [isConnected, setIsConnected] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
@@ -145,35 +187,12 @@ function MLDashboardPageInner() {
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isFetchingStatusRef = useRef(false);
+  const retryCountRef = useRef(0);
 
-  // Day 19.1: Monitor online/offline status
   useEffect(() => {
-    const handleOnline = () => {
-      setIsOnline(true);
-      setSuccessMessage('Connection restored');
-      setRetryCount(0);
-      setConnectionStatus('disconnected');
-      // Retry failed operations
-      if (selectedMachineId) {
-        fetchSensorData(selectedMachineId);
-      }
-    };
-    
-    const handleOffline = () => {
-      setIsOnline(false);
-      setIsConnected(false);
-      setConnectionStatus('offline');
-      setError('Internet connection lost. Working in offline mode.');
-    };
-    
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, [selectedMachineId, setConnectionStatus]);
+    retryCountRef.current = retryCount;
+  }, [retryCount]);
   
   // Day 19.1: Monitor tab visibility for background sync
   useEffect(() => {
@@ -182,7 +201,7 @@ function MLDashboardPageInner() {
       setIsTabVisible(visible);
       
       // Sync data when tab becomes visible
-      if (visible && selectedMachineId && isOnline) {
+      if (visible && selectedMachineId) {
         setIsSyncing(true);
         fetchSensorData(selectedMachineId);
         
@@ -198,21 +217,24 @@ function MLDashboardPageInner() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
     };
-  }, [selectedMachineId, isOnline]);
+  }, [selectedMachineId]);
 
   // Fetch machines on mount
   useEffect(() => {
     fetchMachines();
   }, []);
 
-  // Day 19.1: HTTP Polling for sensor data (30-second intervals)
+  // Day 19.1: HTTP Polling for sensor data (5-second intervals)
   useEffect(() => {
     if (!selectedMachineId) {
       setSensorData(null);
       setSensorHistory([]);
       setPrediction(null);
+      setTextOutput('');
+      setTextOutputError(null);
+      setTextOutputLoading(false);
       setIsConnected(true);
-      setConnectionStatus(isOnline ? 'connected' : 'offline');
+      setConnectionStatus('disconnected');
       
       // Clear polling interval
       if (pollingIntervalRef.current) {
@@ -225,13 +247,16 @@ function MLDashboardPageInner() {
     // Fetch initial sensor data
     fetchSensorData(selectedMachineId);
 
-    // Start HTTP polling (30-second intervals)
+    // Start HTTP polling (5-second intervals)
     // Only poll when tab is visible or in background sync mode
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+
     pollingIntervalRef.current = setInterval(() => {
-      if (isOnline) {
-        fetchSensorData(selectedMachineId);
-      }
-    }, 30000); // 30 seconds
+      fetchSensorData(selectedMachineId);
+    }, 5000); // 5 seconds
 
     return () => {
       if (pollingIntervalRef.current) {
@@ -239,16 +264,242 @@ function MLDashboardPageInner() {
         pollingIntervalRef.current = null;
       }
     };
-  }, [selectedMachineId, isOnline]);
+  }, [selectedMachineId]);
+
+  const formatRunDetailsText = (run: any): string => {
+    const llm = run?.llm || {};
+    const predictions = run?.predictions || {};
+    const machineLine = `Machine: ${String(run?.machine_id || '')}`;
+    const stampLine = `Data stamp: ${String(run?.data_stamp || '')}`;
+
+    const computeHint =
+      llm?.combined?.compute ||
+      llm?.classification?.compute ||
+      llm?.rul?.compute ||
+      llm?.anomaly?.compute ||
+      llm?.timeseries?.compute ||
+      'unknown';
+
+    const computeLine = `LLM compute: ${String(computeHint)}`;
+
+    const combinedText = llm?.combined?.summary
+      ? String(llm.combined.summary)
+      : 'LLM: pending or not available';
+
+    const fmtPct = (v: any) => {
+      const n = Number(v);
+      if (!Number.isFinite(n)) return 'n/a';
+      return `${(n * 100).toFixed(2)}%`;
+    };
+
+    const fmtNum = (v: any, digits = 2) => {
+      const n = Number(v);
+      if (!Number.isFinite(n)) return 'n/a';
+      return n.toFixed(digits);
+    };
+
+    const predictionSummaryLines = (): string[] => {
+      const lines: string[] = [];
+
+      const cls = predictions?.classification;
+      if (cls?.error) {
+        lines.push(`Classification: error: ${String(cls.error)}`);
+      } else if (cls) {
+        lines.push(
+          `Classification: ${String(cls.failure_type ?? 'unknown')} | p=${fmtPct(cls.failure_probability)} | conf=${fmtNum(cls.confidence, 3)}`,
+        );
+      }
+
+      const rul = predictions?.rul;
+      if (rul?.error) {
+        lines.push(`RUL: error: ${String(rul.error)}`);
+      } else if (rul) {
+        lines.push(
+          `RUL: ${fmtNum(rul.rul_hours, 2)} hours (${fmtNum(rul.rul_days, 2)} days) | urgency=${String(rul.urgency ?? 'n/a')} | conf=${fmtNum(rul.confidence, 3)}`,
+        );
+      }
+
+      const ano = predictions?.anomaly;
+      if (ano?.error) {
+        lines.push(`Anomaly: error: ${String(ano.error)}`);
+      } else if (ano) {
+        lines.push(
+          `Anomaly: is_anomaly=${String(ano.is_anomaly)} | score=${fmtNum(ano.anomaly_score, 3)} | method=${String(ano.detection_method ?? 'unknown')}`,
+        );
+      }
+
+      const ts = predictions?.timeseries;
+      if (ts?.error) {
+        lines.push(`Forecast: error: ${String(ts.error)}`);
+      } else if (ts?.forecast_summary) {
+        const summary = String(ts.forecast_summary);
+        const firstTwoLines = summary.split('\n').slice(0, 2).join('\n');
+        lines.push(`Forecast: ${firstTwoLines}${summary.includes('\n') ? ' ...' : ''}`);
+      }
+
+      return lines;
+    };
+
+    return [
+      stampLine,
+      machineLine,
+      computeLine,
+      '',
+      '[LLM]',
+      combinedText,
+      '',
+      '[Predictions]',
+      ...predictionSummaryLines(),
+    ].join('\n');
+  };
+
+  const loadSnapshots = useCallback(async (machineId: string) => {
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/ml/machines/${encodeURIComponent(machineId)}/snapshots?limit=100`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!resp.ok) return;
+      const json = await resp.json();
+      const snaps = Array.isArray(json?.snapshots) ? json.snapshots : [];
+      const rows: SnapshotHistoryRow[] = snaps
+        .map((s: any) => {
+          const stamp = String(s?.data_stamp || '').trim();
+          if (!stamp) return null;
+          return {
+            id: stamp,
+            timestamp: new Date(stamp),
+            data_stamp: stamp,
+            run_id: s?.run_id ?? null,
+            has_run: Boolean(s?.run_id),
+            has_explanation: Boolean(s?.has_explanation),
+            sensor_snapshot: (s?.sensor_data as Record<string, number>) || {},
+          } as SnapshotHistoryRow;
+        })
+        .filter(Boolean) as SnapshotHistoryRow[];
+
+      setPredictionHistory(rows);
+
+      // Auto-select the latest run if none selected.
+      if (!selectedPredictionRunId) {
+        const firstWithRun = rows.find((r) => Boolean(r.run_id));
+        if (firstWithRun?.run_id) {
+          setSelectedPredictionRunId(String(firstWithRun.run_id));
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, [selectedPredictionRunId]);
+
+  const refreshSelectedRunText = useCallback(async (runId: string) => {
+    if (!runId) return;
+    setTextOutputLoading(true);
+    setTextOutputError(null);
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/ml/runs/${encodeURIComponent(runId)}`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        // Under heavy local inference load (model warm-up / Prophet), run reads can exceed 10s.
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        throw new Error(err?.detail || `HTTP ${resp.status}`);
+      }
+      const json = await resp.json();
+      const nextText = formatRunDetailsText(json);
+      setTextOutput(nextText);
+
+      // If this run already has an LLM summary, unlock machine switching.
+      const hasSummary = Boolean(json?.llm?.combined?.summary);
+      if (hasSummary && machineSwitchLockRunIdRef.current === runId) {
+        setMachineSwitchLockRunId(null);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setTextOutputError(msg);
+    } finally {
+      setTextOutputLoading(false);
+    }
+  }, []);
+
+  // LLM push channel (WebSocket) - connect once per browser client
+  useEffect(() => {
+    const clientId = getClientId();
+    const wsUrl = `${API_BASE_URL}`.replace(/^http/i, 'ws') + `/ws/llm/events?client_id=${encodeURIComponent(clientId)}`;
+
+    const connect = () => {
+      try {
+        const ws = new WebSocket(wsUrl);
+        llmWsRef.current = ws;
+
+        ws.onmessage = (evt) => {
+          try {
+            const msg = JSON.parse(evt.data);
+            if (msg?.type !== 'llm_explanation') return;
+            const runId = msg?.run_id as string | undefined;
+            const useCase = msg?.use_case as 'combined' | 'classification' | 'rul' | 'anomaly' | 'timeseries' | undefined;
+            const dataStamp = msg?.data_stamp as string | undefined;
+            if (!runId || !useCase) return;
+
+            if (dataStamp) {
+              setPredictionHistory((prev) => prev.map((r) => {
+                if (r.data_stamp !== dataStamp) return r;
+                return { ...r, run_id: runId, has_run: true, has_explanation: true };
+              }));
+            }
+
+            if (selectedPredictionRunIdRef.current === runId) {
+              void refreshSelectedRunText(runId);
+            }
+
+            if (machineSwitchLockRunIdRef.current === runId) {
+              setMachineSwitchLockRunId(null);
+            }
+          } catch {
+            // ignore
+          }
+        };
+
+        ws.onclose = () => {
+          if (llmWsRetryTimerRef.current) clearTimeout(llmWsRetryTimerRef.current);
+          llmWsRetryTimerRef.current = setTimeout(connect, 2000);
+        };
+      } catch {
+        // ignore
+      }
+    };
+
+    connect();
+
+    return () => {
+      if (llmWsRetryTimerRef.current) clearTimeout(llmWsRetryTimerRef.current);
+      if (llmWsRef.current) {
+        try { llmWsRef.current.close(); } catch { /* ignore */ }
+      }
+      llmWsRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // When machine changes, pull the persisted snapshots.
+  useEffect(() => {
+    if (!selectedMachineId) return;
+    void loadSnapshots(selectedMachineId);
+  }, [selectedMachineId, loadSnapshots]);
+
+  // When a run is selected, load and format its latest details.
+  useEffect(() => {
+    if (!selectedPredictionRunId) return;
+    void refreshSelectedRunText(selectedPredictionRunId);
+  }, [selectedPredictionRunId, refreshSelectedRunText]);
 
   // Day 19.2: Fetch sensor data with real API call and retry logic
   const fetchSensorData = useCallback(async (machineId: string) => {
-    if (!isOnline) {
-      // Offline mode: use cached data or show offline indicator
-      setIsConnected(false);
-      setConnectionStatus('offline');
-      return;
-    }
+    if (isFetchingStatusRef.current) return;
+    isFetchingStatusRef.current = true;
     
     try {
       // Real API call to backend
@@ -257,7 +508,8 @@ function MLDashboardPageInner() {
         headers: {
           'Content-Type': 'application/json',
         },
-        signal: AbortSignal.timeout(5000), // 5-second timeout
+        // Keep this generous to avoid flapping during local CPU-heavy inference.
+        signal: AbortSignal.timeout(15_000),
       });
       
       if (!response.ok) {
@@ -269,10 +521,12 @@ function MLDashboardPageInner() {
       
       // Optimistic UI update
       setSensorData(newData);
+      setIsOnline(true);
       setIsConnected(true);
       setConnectionStatus('connected');
       setLastSyncTime(new Date());
       setRetryCount(0);
+      retryCountRef.current = 0;
 
       // Add to history (keep last 120 readings = 10 minutes)
       setSensorHistory((prev) => {
@@ -282,31 +536,58 @@ function MLDashboardPageInner() {
         };
         return [...prev.slice(-119), newReading];
       });
+
+      // Persisted 5-second snapshot rows for the bottom history.
+      const stamp = String(data.data_stamp || data.last_update || '').trim();
+      if (stamp) {
+        const row: SnapshotHistoryRow = {
+          id: stamp,
+          timestamp: new Date(stamp),
+          data_stamp: stamp,
+          run_id: data.run_id ?? null,
+          has_run: Boolean(data.run_id),
+          sensor_snapshot: newData,
+        };
+        setPredictionHistory((prev) => {
+          if (prev.length > 0 && prev[0].id === row.id) return prev;
+          const next = [row, ...prev.filter((r) => r.id !== row.id)];
+          return next.slice(0, 500);
+        });
+      }
       
     } catch (err) {
       console.error('Error fetching sensor data:', err);
-      setIsConnected(false);
-      setConnectionStatus('disconnected');
+      // Don't immediately flip to disconnected for transient timeouts.
+      // We'll mark disconnected only after retries are exhausted.
       
       // Check if it's a timeout or network error
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       
       // Retry logic with exponential backoff
-      if (retryCount < 3) {
-        const retryDelay = Math.min(1000 * Math.pow(2, retryCount), 10000);
-        setRetryCount((prev) => prev + 1);
-        
-        console.log(`Retry ${retryCount + 1}/3 in ${retryDelay}ms...`);
-        
-        if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
-        retryTimeoutRef.current = setTimeout(() => {
-          fetchSensorData(machineId);
-        }, retryDelay);
+      const currentRetryCount = retryCountRef.current;
+      if (currentRetryCount < 3) {
+        setRetryCount((prev) => {
+          const next = prev + 1;
+          retryCountRef.current = next;
+          return next;
+        });
+
+        // Avoid scheduling extra out-of-band retries while a fixed polling interval is active.
+        // The next poll tick will retry automatically.
+        if (retryTimeoutRef.current) {
+          clearTimeout(retryTimeoutRef.current);
+          retryTimeoutRef.current = null;
+        }
       } else {
+        setIsOnline(false);
+        setIsConnected(false);
+        setConnectionStatus('disconnected');
         setError(`Failed to connect to server: ${errorMessage}`);
       }
+    } finally {
+      isFetchingStatusRef.current = false;
     }
-  }, [isOnline, retryCount, setConnectionStatus]);
+  }, [setConnectionStatus]);
 
   // Day 19.2: Fetch available machines from backend
   const fetchMachines = async () => {
@@ -325,6 +606,7 @@ function MLDashboardPageInner() {
       
       const data = await response.json();
       setMachines(data.machines);
+      setIsOnline(true);
       setIsConnected(true);
       setConnectionStatus('connected');
       
@@ -332,8 +614,9 @@ function MLDashboardPageInner() {
     } catch (err) {
       console.error('Error fetching machines:', err);
       setError('Failed to load machines from server. Using fallback data.');
+      setIsOnline(false);
       setIsConnected(false);
-      setConnectionStatus(isOnline ? 'disconnected' : 'offline');
+      setConnectionStatus('disconnected');
       
       // Fallback to mock data if API fails
       setMachines(getMockMachines());
@@ -342,93 +625,58 @@ function MLDashboardPageInner() {
 
   // Day 19.2: Run prediction with real API call
   const handleRunPrediction = async () => {
-    if (!selectedMachineId || !sensorData) {
-      setError('No machine selected or sensor data unavailable');
+    if (!selectedMachineId) {
+      setError('No machine selected');
       return;
     }
-    
-    if (!isOnline) {
-      setError('Cannot run prediction while offline');
+
+    if (loading || machineSwitchLockRunId) {
+      setInfoMessage('Prediction/LLM is running. Please wait before starting another run.');
       return;
     }
 
     setLoading(true);
     setError(null);
-    
-    const startTime = performance.now();
 
     try {
-      // Real API call to ML prediction endpoint
-      const response = await fetch(API_ENDPOINTS.predictClassification, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          machine_id: selectedMachineId,
-          sensor_data: sensorData,
-        }),
-        signal: AbortSignal.timeout(10000), // 10-second timeout for ML inference
-      });
-      
+      const clientId = getClientId();
+      const response = await fetch(
+        `${API_BASE_URL}/api/ml/machines/${encodeURIComponent(selectedMachineId)}/auto/run_once?client_id=${encodeURIComponent(clientId)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          // Back-end run_once performs synchronous inference (Prophet can take >60s).
+          // Keep this long enough to avoid client-side abort while the server is still working.
+          signal: AbortSignal.timeout(180_000),
+        }
+      );
+
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
         throw new Error(errorData.detail || `HTTP ${response.status}`);
       }
-      
+
       const apiResult = await response.json();
-      const endTime = performance.now();
-      const inferenceTime = Math.round(endTime - startTime);
-      
-      console.log(`✓ Prediction completed in ${inferenceTime}ms`);
-      
-      // Transform API response to match PredictionCardResult interface
-      const urgency = apiResult.prediction.rul ? 
-        getUrgencyFromRUL(apiResult.prediction.rul.rul_hours).toLowerCase() as 'low' | 'medium' | 'high' | 'critical'
-        : 'low' as const;
-      
-      const result: PredictionCardResult = {
-        classification: {
-          failure_type: apiResult.prediction.failure_type,
-          confidence: apiResult.prediction.confidence,
-          failure_probability: apiResult.prediction.failure_probability,
-          all_probabilities: apiResult.prediction.all_probabilities,
-        },
-        rul: apiResult.prediction.rul ? {
-          rul_hours: apiResult.prediction.rul.rul_hours,
-          rul_days: apiResult.prediction.rul.rul_hours / 24,
-          urgency: urgency,
-          maintenance_window: apiResult.prediction.rul.maintenance_window || 'TBD',
-        } : undefined,
-        timestamp: apiResult.timestamp,
-      };
+      const runId = String(apiResult?.run_id || '').trim();
+      const machineId = String(apiResult?.machine_id || '').trim();
+      if (!runId || !machineId) throw new Error('Invalid run response');
 
-      // Update with real prediction data
-      setPrediction(result);
-      
-      // Add to history
-      const historicalPred: HistoricalPrediction = {
-        id: `pred_${Date.now()}`,
-        timestamp: new Date(apiResult.timestamp),
-        failure_type: result.classification.failure_type,
-        confidence: result.classification.confidence,
-        rul_hours: result.rul?.rul_hours || 0,
-        urgency: result.rul ? result.rul.urgency : 'Low',
-        health_state: getHealthStateFromProbability(result.classification.failure_probability),
-      };
-      setPredictionHistory((prev) => [historicalPred, ...prev]);
+      setMachineSwitchLockRunId(runId);
 
-      setSuccessMessage(`Prediction completed in ${inferenceTime}ms`);
-      setLastSyncTime(new Date());
+      setIsOnline(true);
+      setIsConnected(true);
+      setConnectionStatus('connected');
+      setSuccessMessage('Prediction started');
+
+      setPrediction(null);
+      setSelectedPredictionRunId(runId);
+      await loadSnapshots(machineId);
+      await refreshSelectedRunText(runId);
+
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       setError(`Prediction failed: ${errorMessage}`);
       console.error('Prediction error:', err);
-      
-      // Fallback to mock prediction for demo purposes
-      console.log('Using mock prediction as fallback...');
-      const mockResult = generateMockPrediction(sensorData);
-      setPrediction(mockResult);
     } finally {
       setLoading(false);
     }
@@ -436,9 +684,17 @@ function MLDashboardPageInner() {
 
   // Handle machine selection
   const handleMachineSelect = (machineId: string) => {
+    const requested = (machineId || '').trim();
+    const current = (selectedMachineId || '').trim();
+    if ((machineSwitchLockRunId || loading) && requested && requested !== current) {
+      setInfoMessage('Prediction/LLM is running. Please wait before switching machines.');
+      return;
+    }
     setSelectedMachineId(machineId ? machineId : null);
     setPrediction(null);
     setSensorHistory([]);
+    setPredictionHistory([]);
+    setSelectedPredictionRunId(null);
   };
 
   // Get selected machine details
@@ -532,7 +788,7 @@ function MLDashboardPageInner() {
                 {getViewTitle(selectedView)}
               </Typography>
             </Breadcrumbs>
-            
+
             {/* Day 19.1: Connection Status Indicators */}
             <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
               {selectedView !== 'history' && (
@@ -552,7 +808,7 @@ function MLDashboardPageInner() {
                   sx={{ bgcolor: 'rgba(103, 126, 234, 0.2)', color: '#667eea' }}
                 />
               )}
-              
+
               <Chip
                 icon={isOnline ? <WifiIcon /> : <WifiOffIcon />}
                 label={isOnline ? 'Online' : 'Offline'}
@@ -560,7 +816,7 @@ function MLDashboardPageInner() {
                 color={isOnline ? 'success' : 'error'}
                 sx={{ minWidth: 100 }}
               />
-              
+
               <Chip
                 icon={isConnected ? <CloudDoneIcon /> : <CloudOffIcon />}
                 label={connectionStatus === 'connected' ? 'Connected' : connectionStatus === 'offline' ? 'Offline' : 'Disconnected'}
@@ -568,7 +824,7 @@ function MLDashboardPageInner() {
                 color={connectionStatus === 'connected' ? 'success' : connectionStatus === 'offline' ? 'error' : 'warning'}
                 sx={{ minWidth: 120 }}
               />
-              
+
               {lastSyncTime && isConnected && (
                 <Typography variant="caption" sx={{ color: '#e5e7eb', ml: 1 }}>
                   Last sync: {lastSyncTime.toLocaleTimeString()}
@@ -686,17 +942,22 @@ function MLDashboardPageInner() {
                 <SensorDashboard
                   machineId={selectedMachineId}
                   sensorData={sensorData || {}}
-                  lastUpdated={new Date()}
+                  lastUpdated={lastSyncTime}
                   loading={!sensorData}
+                  connected={isConnected}
+                  error={error}
                 />
 
-                {/* Prediction Card */}
+                {/* Prediction Card (contents now show text output) */}
                 <PredictionCard
                   machineId={selectedMachineId}
                   prediction={prediction}
                   loading={loading}
                   onRunPrediction={handleRunPrediction}
                   onExplain={() => setShowExplanation(true)}
+                  textOutput={textOutput}
+                  textOutputLoading={textOutputLoading}
+                  textOutputError={textOutputError}
                 />
 
                 {/* Sensor Trend Charts */}
@@ -714,6 +975,10 @@ function MLDashboardPageInner() {
                   machineId={selectedMachineId}
                   predictions={predictionHistory}
                   limit={100}
+                  onRowClick={(p) => {
+                    if (!p.run_id) return;
+                    setSelectedPredictionRunId(String(p.run_id));
+                  }}
                 />
               </>
             ) : (
@@ -936,64 +1201,9 @@ function getMockMachines(): Machine[] {
   }));
 }
 
-function generateMockPrediction(_sensorData: Record<string, number>): PredictionCardResult {
-  const failureProb = Math.random() * 0.3; // 0-30% for mostly healthy
-  const confidence = 0.85 + Math.random() * 0.1;
-  
-  let failureType: string;
-  let rulHours: number;
-  let urgency: 'low' | 'medium' | 'high' | 'critical';
-  
-  if (failureProb < 0.15) {
-    failureType = 'None';
-    rulHours = 400 + Math.random() * 300;
-    urgency = 'low';
-  } else if (failureProb < 0.40) {
-    failureType = 'Bearing Wear';
-    rulHours = 150 + Math.random() * 250;
-    urgency = 'medium';
-  } else if (failureProb < 0.70) {
-    failureType = 'Overheating';
-    rulHours = 50 + Math.random() * 100;
-    urgency = 'high';
-  } else {
-    failureType = 'Bearing Seizure';
-    rulHours = 10 + Math.random() * 40;
-    urgency = 'critical';
-  }
-
-  return {
-    classification: {
-      failure_type: failureType,
-      confidence,
-      failure_probability: failureProb,
-      all_probabilities: {
-        Normal: 1 - failureProb,
-        'Bearing Wear': failureProb * 0.5,
-        Overheating: failureProb * 0.3,
-        Electrical: failureProb * 0.2,
-      },
-    },
-    rul: {
-      rul_hours: rulHours,
-      rul_days: rulHours / 24,
-      urgency,
-      maintenance_window: urgency === 'critical' ? 'Immediate' : urgency === 'high' ? '24 hours' : urgency === 'medium' ? '3 days' : '1 week',
-    },
-    timestamp: new Date().toISOString(),
-  };
-}
-
 function getHealthStateFromProbability(failureProb: number): string {
   if (failureProb < 0.15) return 'HEALTHY';
   if (failureProb < 0.40) return 'DEGRADING';
   if (failureProb < 0.70) return 'WARNING';
   return 'CRITICAL';
-}
-
-function getUrgencyFromRUL(rulHours: number): string {
-  if (rulHours > 240) return 'Low';
-  if (rulHours > 120) return 'Medium';
-  if (rulHours > 48) return 'High';
-  return 'Critical';
 }

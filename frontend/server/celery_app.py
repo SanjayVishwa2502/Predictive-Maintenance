@@ -54,15 +54,15 @@ celery_app.conf.update(
     # Task Result Extended
     result_extended=True,  # Include task args, kwargs, and traceback in result
     
-    # Task Routes (organize tasks by queue) - DISABLED FOR TESTING
-    # Issue: Tasks weren't being queued when routes were enabled
-    # Will re-enable after verifying basic functionality works
-    # task_routes={
-    #     "tasks.gan.*": {"queue": "gan"},
-    #     "tasks.ml.*": {"queue": "ml"},
-    #     "tasks.llm.*": {"queue": "llm"},
-    #     "tasks.test_task.*": {"queue": "default"},
-    # },
+    # Task Routes (organize tasks by queue)
+    # LLM runs on CPU and can be slow, so we isolate it to its own queue.
+    task_routes={
+        "tasks.gan.*": {"queue": "gan"},
+        "tasks.ml.*": {"queue": "ml"},
+        "tasks.ml_training_tasks.*": {"queue": "ml"},
+        "tasks.llm.*": {"queue": "llm"},
+        "tasks.test_task.*": {"queue": "default"},
+    },
     
     # Monitoring
     worker_send_task_events=True,
@@ -74,6 +74,7 @@ celery_app.conf.update(
 import tasks.test_task  # noqa
 import tasks.gan_tasks  # noqa
 import tasks.ml_training_tasks  # noqa
+import tasks.llm_tasks  # noqa
 
 logger.info(f"Celery app configured with broker: {settings.CELERY_BROKER_URL}")
 logger.info(f"Result backend: {settings.CELERY_RESULT_BACKEND}")

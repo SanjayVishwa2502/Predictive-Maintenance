@@ -129,7 +129,7 @@ class RAGRetriever:
                 print(f"    Loading metadata from {metadata_path}...")
                 with open(metadata_path, 'rb') as f:
                     self.documents = pickle.load(f)
-                print("    ✓ RAG index loaded successfully")
+                print("    [OK] RAG index loaded successfully")
             else:
                 print(f"    ⚠️ RAG index files not found in {self.embeddings_dir}")
                 
@@ -324,7 +324,7 @@ class LLMGenerator:
                 n_gpu_layers=-1,  # Offload all layers to GPU
                 verbose=False
             )
-            print("    ✓ Llama model loaded successfully")
+            print("    [OK] Llama model loaded successfully")
         except ImportError:
             print("    ⚠️ llama-cpp-python not installed. LLM generation will fail.")
         except Exception as e:
@@ -434,7 +434,7 @@ class UnifiedInferenceService:
         # Preload most-used ML models (optional)
         # self._preload_common_models()
         
-        print("✓ Unified Inference Service initialized")
+        print("[OK] Unified Inference Service initialized")
     
     def run_ml_inference(self, machine_id: str, sensor_data: Dict, 
                         model_type: str) -> Dict:
@@ -659,11 +659,11 @@ def main():
     print("\nThis is a skeleton implementation.")
     print("Full implementation will be completed in Phase 3.5.1")
     print("\nComponents:")
-    print("  ✓ MLModelManager - ML model loading and caching")
-    print("  ✓ RAGRetriever - Knowledge base retrieval")
-    print("  ✓ PromptFormatter - Prompt template formatting")
-    print("  ✓ LLMGenerator - Explanation generation")
-    print("  ✓ UnifiedInferenceService - End-to-end orchestration")
+    print("  [OK] MLModelManager - ML model loading and caching")
+    print("  [OK] RAGRetriever - Knowledge base retrieval")
+    print("  [OK] PromptFormatter - Prompt template formatting")
+    print("  [OK] LLMGenerator - Explanation generation")
+    print("  [OK] UnifiedInferenceService - End-to-end orchestration")
     print("\nNext Steps (Phase 3.5.1):")
     print("  1. Implement RAGRetriever.retrieve()")
     print("  2. Implement PromptFormatter.format_prompt()")

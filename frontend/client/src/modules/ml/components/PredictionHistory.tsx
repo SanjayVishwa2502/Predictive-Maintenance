@@ -32,7 +32,6 @@ import {
   InputLabel,
   InputAdornment,
   Tooltip,
-  LinearProgress,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -43,12 +42,7 @@ import { DataGrid } from '@mui/x-data-grid';
 import type { GridColDef, GridRenderCellParams } from '@mui/x-data-grid';
 import {
   Search as SearchIcon,
-  Download as DownloadIcon,
   Visibility as ViewIcon,
-  CheckCircle as HealthyIcon,
-  Warning as WarningIcon,
-  Error as CriticalIcon,
-  Circle as DegradingIcon,
 } from '@mui/icons-material';
 
 // ============================================================================
@@ -65,52 +59,37 @@ export interface PredictionHistoryProps {
 export interface HistoricalPrediction {
   id: string;
   timestamp: Date;
-  failure_type: string;
-  confidence: number;
-  rul_hours: number;
-  urgency: string;
-  health_state: string;
+
+  // Optional fields used by demos/older code paths
+  failure_type?: string;
+  confidence?: number;
+  rul_hours?: number;
+  urgency?: string;
+  health_state?: string;
+
+  // 5-second snapshot metadata
+  data_stamp?: string;
+  run_id?: string | null;
+  has_run?: boolean;
+  has_explanation?: boolean;
+  sensor_snapshot?: Record<string, number>;
 }
+
+type RunDetails = {
+  run_id: string;
+  machine_id: string;
+  data_stamp: string;
+  created_at: string;
+  sensor_data: Record<string, number>;
+  predictions: Record<string, any>;
+  llm: Record<string, any>;
+};
 
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
 
-const getStatusConfig = (healthState: string) => {
-  const configs: Record<string, { icon: React.ReactElement; color: string; label: string }> = {
-    HEALTHY: {
-      icon: <HealthyIcon sx={{ fontSize: 20 }} />,
-      color: '#10b981',
-      label: 'Healthy',
-    },
-    DEGRADING: {
-      icon: <DegradingIcon sx={{ fontSize: 20 }} />,
-      color: '#fbbf24',
-      label: 'Degrading',
-    },
-    WARNING: {
-      icon: <WarningIcon sx={{ fontSize: 20 }} />,
-      color: '#f97316',
-      label: 'Warning',
-    },
-    CRITICAL: {
-      icon: <CriticalIcon sx={{ fontSize: 20 }} />,
-      color: '#ef4444',
-      label: 'Critical',
-    },
-  };
-  return configs[healthState] || configs.HEALTHY;
-};
-
-const getUrgencyColor = (urgency: string): string => {
-  const colors: Record<string, string> = {
-    Low: '#10b981',
-    Medium: '#fbbf24',
-    High: '#f97316',
-    Critical: '#ef4444',
-  };
-  return colors[urgency] || '#6b7280';
-};
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 const formatTimestamp = (date: Date): string => {
   return new Intl.DateTimeFormat('en-US', {
@@ -118,34 +97,14 @@ const formatTimestamp = (date: Date): string => {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
+    second: '2-digit',
     hour12: true,
   }).format(date);
 };
 
-const exportToCSV = (predictions: HistoricalPrediction[], machineId: string) => {
-  const headers = ['Timestamp', 'Status', 'Failure Type', 'Confidence (%)', 'RUL (hours)', 'RUL (days)', 'Urgency'];
-  const rows = predictions.map(pred => [
-    pred.timestamp.toISOString(),
-    pred.health_state,
-    pred.failure_type,
-    (pred.confidence * 100).toFixed(1),
-    pred.rul_hours.toFixed(1),
-    (pred.rul_hours / 24).toFixed(1),
-    pred.urgency,
-  ]);
-
-  const csv = [
-    headers.join(','),
-    ...rows.map(row => row.join(',')),
-  ].join('\n');
-
-  const blob = new Blob([csv], { type: 'text/csv' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `${machineId}_prediction_history_${Date.now()}.csv`;
-  link.click();
-  URL.revokeObjectURL(url);
+const viewLatestDataset = (machineId: string) => {
+  const url = `${API_BASE}/api/ml/machines/${encodeURIComponent(machineId)}/audit/datasets/latest`;
+  window.open(url, '_blank', 'noopener,noreferrer');
 };
 
 const filterByDateRange = (predictions: HistoricalPrediction[], range: string): HistoricalPrediction[] => {
@@ -185,8 +144,12 @@ export default function PredictionHistory({
 }: PredictionHistoryProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [dateRange, setDateRange] = useState('all');
+  const [explanationFilter, setExplanationFilter] = useState<'all' | 'no' | 'with'>('all');
   const [selectedPrediction, setSelectedPrediction] = useState<HistoricalPrediction | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [detailsError, setDetailsError] = useState<string | null>(null);
+  const [runDetails, setRunDetails] = useState<RunDetails | null>(null);
 
   // Filter predictions
   const filteredPredictions = useMemo(() => {
@@ -200,33 +163,73 @@ export default function PredictionHistory({
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(
         pred =>
-          pred.failure_type.toLowerCase().includes(query) ||
-          pred.urgency.toLowerCase().includes(query) ||
-          pred.health_state.toLowerCase().includes(query)
+          (pred.data_stamp || '').toLowerCase().includes(query) ||
+          (pred.run_id || '').toLowerCase().includes(query)
       );
     }
 
-    return filtered;
-  }, [predictions, limit, dateRange, searchQuery]);
+    // Apply explanation filter
+    if (explanationFilter !== 'all') {
+      filtered = filtered.filter((pred) => {
+        const hasExplanation = Boolean(pred.has_explanation);
+        return explanationFilter === 'with' ? hasExplanation : !hasExplanation;
+      });
+    }
 
-  // Handle row click
-  const handleRowClick = (prediction: HistoricalPrediction) => {
-    if (onRowClick) {
-      onRowClick(prediction);
-    } else {
-      setSelectedPrediction(prediction);
-      setDetailsOpen(true);
+    return filtered;
+  }, [predictions, limit, dateRange, searchQuery, explanationFilter]);
+
+  const openDetails = async (prediction: HistoricalPrediction) => {
+    setSelectedPrediction(prediction);
+    setDetailsOpen(true);
+    setDetailsLoading(Boolean((prediction.run_id || '').trim()));
+    setDetailsError(null);
+    setRunDetails(null);
+
+    const runId = (prediction.run_id || '').trim();
+    if (!runId) {
+      setDetailsLoading(false);
+      return;
+    }
+
+    try {
+      const resp = await fetch(`${API_BASE}/api/ml/runs/${encodeURIComponent(runId)}`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        throw new Error(err?.detail || `HTTP ${resp.status}`);
+      }
+      const json = await resp.json();
+      setRunDetails(json as RunDetails);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setDetailsError(msg);
+    } finally {
+      setDetailsLoading(false);
     }
   };
 
-  // Handle CSV export
-  const handleExport = () => {
-    exportToCSV(filteredPredictions, machineId);
+  // Row click = select/run callback (used by dashboard to show text output)
+  const handleRowSelect = (prediction: HistoricalPrediction) => {
+    const hasRun = Boolean((prediction.run_id || '').trim());
+    if (onRowClick && hasRun) {
+      onRowClick(prediction);
+      return;
+    }
+    void openDetails(prediction);
   };
 
   // Handle date range change
   const handleDateRangeChange = (event: SelectChangeEvent) => {
     setDateRange(event.target.value);
+  };
+
+  const handleExplanationFilterChange = (event: SelectChangeEvent) => {
+    const v = event.target.value as 'all' | 'no' | 'with';
+    setExplanationFilter(v);
   };
 
   // DataGrid columns
@@ -242,112 +245,110 @@ export default function PredictionHistory({
       ),
     },
     {
-      field: 'health_state',
-      headerName: 'Status',
-      width: 140,
-      renderCell: (params: GridRenderCellParams) => {
-        const config = getStatusConfig(params.row.health_state);
-        return (
-          <Stack direction="row" spacing={1} alignItems="center">
-            <Box sx={{ color: config.color }}>{config.icon}</Box>
-            <Typography variant="body2" sx={{ color: config.color, fontWeight: 500 }}>
-              {config.label}
-            </Typography>
-          </Stack>
-        );
-      },
-    },
-    {
-      field: 'confidence',
-      headerName: 'Confidence',
+      field: 'has_run',
+      headerName: 'Prediction/LLM',
       width: 150,
       renderCell: (params: GridRenderCellParams) => {
-        const percentage = params.row.confidence * 100;
+        const hasRun = Boolean(params.row.run_id);
+        const hasExplanation = Boolean(params.row.has_explanation);
+        const label = !hasRun ? 'NO RUN' : (hasExplanation ? 'EXPLAINED' : 'NO EXPLANATION');
+        const palette = !hasRun
+          ? { bg: 'rgba(156,163,175,0.12)', fg: '#9ca3af', border: 'rgba(156,163,175,0.25)' }
+          : (hasExplanation
+            ? { bg: 'rgba(16,185,129,0.15)', fg: '#10b981', border: 'rgba(16,185,129,0.35)' }
+            : { bg: 'rgba(251,191,36,0.12)', fg: '#fbbf24', border: 'rgba(251,191,36,0.35)' });
         return (
-          <Box sx={{ width: '100%' }}>
-            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
-              <Typography variant="body2" sx={{ color: '#d1d5db', fontWeight: 500 }}>
-                {percentage.toFixed(0)}%
-              </Typography>
-            </Stack>
-            <LinearProgress
-              variant="determinate"
-              value={percentage}
-              sx={{
-                height: 4,
-                borderRadius: 2,
-                bgcolor: 'rgba(255, 255, 255, 0.1)',
-                '& .MuiLinearProgress-bar': {
-                  bgcolor: percentage >= 80 ? '#10b981' : percentage >= 60 ? '#fbbf24' : '#f97316',
-                },
-              }}
-            />
-          </Box>
+          <Chip
+            size="small"
+            label={label}
+            sx={{
+              bgcolor: palette.bg,
+              color: palette.fg,
+              border: '1px solid',
+              borderColor: palette.border,
+              fontWeight: 700,
+            }}
+          />
         );
       },
     },
     {
-      field: 'rul_hours',
-      headerName: 'RUL (hours)',
-      width: 120,
-      type: 'number',
+      field: 'run_id',
+      headerName: 'Run ID',
+      width: 260,
       renderCell: (params: GridRenderCellParams) => (
-        <Typography variant="body2" sx={{ color: '#d1d5db', fontWeight: 500 }}>
-          {params.row.rul_hours.toFixed(1)}
+        <Typography variant="body2" sx={{ color: params.row.run_id ? '#d1d5db' : '#6b7280' }}>
+          {params.row.run_id ? String(params.row.run_id) : '—'}
         </Typography>
       ),
     },
     {
-      field: 'rul_days',
-      headerName: 'RUL (days)',
-      width: 120,
-      type: 'number',
-      renderCell: (params: GridRenderCellParams) => (
-        <Typography variant="body2" sx={{ color: '#9ca3af' }}>
-          {(params.row.rul_hours / 24).toFixed(1)}
-        </Typography>
-      ),
-    },
-    {
-      field: 'urgency',
-      headerName: 'Urgency',
-      width: 120,
-      renderCell: (params: GridRenderCellParams) => (
-        <Chip
-          label={params.row.urgency}
-          size="small"
-          sx={{
-            bgcolor: `${getUrgencyColor(params.row.urgency)}20`,
-            color: getUrgencyColor(params.row.urgency),
-            borderColor: getUrgencyColor(params.row.urgency),
-            border: '1px solid',
-            fontWeight: 600,
-          }}
-        />
-      ),
+      field: 'sensor_snapshot',
+      headerName: 'Sensor Readings',
+      flex: 1,
+      minWidth: 320,
+      sortable: false,
+      renderCell: (params: GridRenderCellParams) => {
+        const snap = (params.row.sensor_snapshot || {}) as Record<string, number>;
+        const entries = Object.entries(snap);
+        if (!entries.length) {
+          return (
+            <Typography variant="body2" sx={{ color: '#6b7280' }}>
+              —
+            </Typography>
+          );
+        }
+
+        // Render a readable inline summary but preserve full data via title tooltip.
+        const full = entries
+          .map(([k, v]) => `${k}=${Number.isFinite(Number(v)) ? Number(v).toFixed(3) : String(v)}`)
+          .join(', ');
+
+        return (
+          <Typography
+            variant="body2"
+            title={full}
+            sx={{
+              color: '#d1d5db',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              width: '100%',
+            }}
+          >
+            {full}
+          </Typography>
+        );
+      },
     },
     {
       field: 'actions',
       headerName: 'Actions',
       width: 100,
       sortable: false,
-      renderCell: (params: GridRenderCellParams) => (
-        <Tooltip title="View Details">
-          <IconButton
-            size="small"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleRowClick(params.row);
-            }}
-            sx={{
-              color: '#667eea',
-              '&:hover': { bgcolor: 'rgba(102, 126, 234, 0.1)' },
-            }}
-          >
-            <ViewIcon />
-          </IconButton>
-        </Tooltip>
-      ),
+      renderCell: (params: GridRenderCellParams) => {
+        const canView = true;
+        return (
+          <Tooltip title={'View Details'}>
+            <span>
+              <IconButton
+                size="small"
+                disabled={!canView}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void openDetails(params.row);
+                }}
+                sx={{
+                  color: canView ? '#667eea' : '#6b7280',
+                  '&:hover': { bgcolor: canView ? 'rgba(102, 126, 234, 0.1)' : 'transparent' },
+                }}
+              >
+                <ViewIcon />
+              </IconButton>
+            </span>
+          </Tooltip>
+        );
+      },
     },
   ];
 
@@ -373,7 +374,7 @@ export default function PredictionHistory({
         }
         subheader={
           <Typography variant="body2" sx={{ color: '#9ca3af', mt: 0.5 }}>
-            Last {limit} predictions • {filteredPredictions.length} shown
+            Last {limit} snapshots • {filteredPredictions.length} shown
           </Typography>
         }
       />
@@ -384,7 +385,7 @@ export default function PredictionHistory({
           {/* Search */}
           <TextField
             size="small"
-            placeholder="Search by failure type or urgency..."
+            placeholder="Search by data stamp or run id..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             InputProps={{
@@ -430,12 +431,32 @@ export default function PredictionHistory({
             </Select>
           </FormControl>
 
-          {/* Export Button */}
+          {/* Explanation Filter */}
+          <FormControl
+            size="small"
+            sx={{
+              minWidth: 190,
+              '& .MuiOutlinedInput-root': {
+                bgcolor: 'rgba(31, 41, 55, 0.5)',
+                '& fieldset': { borderColor: 'rgba(255, 255, 255, 0.2)' },
+                '&:hover fieldset': { borderColor: 'rgba(255, 255, 255, 0.3)' },
+              },
+              '& .MuiInputLabel-root': { color: '#d1d5db' },
+              '& .MuiSelect-select': { color: '#d1d5db' },
+            }}
+          >
+            <InputLabel>Explanation</InputLabel>
+            <Select value={explanationFilter} onChange={handleExplanationFilterChange} label="Explanation">
+              <MenuItem value="all">All points</MenuItem>
+              <MenuItem value="no">No explanation</MenuItem>
+              <MenuItem value="with">With explanation</MenuItem>
+            </Select>
+          </FormControl>
+
+          {/* View dataset (server-collected CSV) */}
           <Button
             variant="outlined"
-            startIcon={<DownloadIcon />}
-            onClick={handleExport}
-            disabled={filteredPredictions.length === 0}
+            onClick={() => viewLatestDataset(machineId)}
             sx={{
               borderColor: '#667eea',
               color: '#667eea',
@@ -445,7 +466,7 @@ export default function PredictionHistory({
               },
             }}
           >
-            Export CSV
+            View Dataset
           </Button>
         </Stack>
 
@@ -499,7 +520,7 @@ export default function PredictionHistory({
             }}
             pageSizeOptions={[10, 25, 50]}
             disableRowSelectionOnClick
-            onRowClick={(params) => handleRowClick(params.row)}
+            onRowClick={(params) => handleRowSelect(params.row)}
             sx={{
               '& .MuiDataGrid-virtualScroller': {
                 minHeight: filteredPredictions.length === 0 ? 200 : 'auto',
@@ -512,7 +533,12 @@ export default function PredictionHistory({
       {/* DETAILS MODAL */}
       <Dialog
         open={detailsOpen}
-        onClose={() => setDetailsOpen(false)}
+        onClose={() => {
+          setDetailsOpen(false);
+          setDetailsLoading(false);
+          setDetailsError(null);
+          setRunDetails(null);
+        }}
         maxWidth="sm"
         fullWidth
         PaperProps={{
@@ -528,7 +554,7 @@ export default function PredictionHistory({
           <>
             <DialogTitle sx={{ borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
               <Typography variant="h6" sx={{ fontWeight: 600, color: '#f9fafb' }}>
-                Prediction Details
+                Run Details
               </Typography>
               <Typography variant="body2" sx={{ color: '#9ca3af', mt: 0.5 }}>
                 {formatTimestamp(selectedPrediction.timestamp)}
@@ -538,62 +564,109 @@ export default function PredictionHistory({
               <Stack spacing={2}>
                 <Box>
                   <Typography variant="caption" sx={{ color: '#9ca3af' }}>
-                    Health State
+                    Data Stamp
                   </Typography>
-                  <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5 }}>
-                    <Box sx={{ color: getStatusConfig(selectedPrediction.health_state).color }}>
-                      {getStatusConfig(selectedPrediction.health_state).icon}
-                    </Box>
-                    <Typography variant="body1" sx={{ color: '#f9fafb', fontWeight: 500 }}>
-                      {getStatusConfig(selectedPrediction.health_state).label}
+                  <Typography variant="body2" sx={{ color: '#d1d5db', mt: 0.5 }}>
+                    {selectedPrediction.data_stamp || '—'}
+                  </Typography>
+                </Box>
+
+                <Box>
+                  <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                    Run ID
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#d1d5db', mt: 0.5 }}>
+                    {selectedPrediction.run_id || '—'}
+                  </Typography>
+                </Box>
+
+                {detailsLoading && (
+                  <Typography variant="body2" sx={{ color: '#9ca3af' }}>
+                    Loading run details...
+                  </Typography>
+                )}
+
+                {detailsError && (
+                  <Typography variant="body2" sx={{ color: '#f97316' }}>
+                    {detailsError}
+                  </Typography>
+                )}
+
+                {(selectedPrediction.sensor_snapshot || runDetails?.sensor_data) && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                      Observed Data (Snapshot)
                     </Typography>
-                  </Stack>
-                </Box>
-
-                <Box>
-                  <Typography variant="caption" sx={{ color: '#9ca3af' }}>
-                    Failure Type
-                  </Typography>
-                  <Typography variant="body1" sx={{ color: '#f9fafb', mt: 0.5 }}>
-                    {selectedPrediction.failure_type}
-                  </Typography>
-                </Box>
-
-                <Box>
-                  <Typography variant="caption" sx={{ color: '#9ca3af' }}>
-                    Confidence
-                  </Typography>
-                  <Typography variant="body1" sx={{ color: '#f9fafb', mt: 0.5 }}>
-                    {(selectedPrediction.confidence * 100).toFixed(1)}%
-                  </Typography>
-                </Box>
-
-                <Box>
-                  <Typography variant="caption" sx={{ color: '#9ca3af' }}>
-                    Remaining Useful Life
-                  </Typography>
-                  <Typography variant="body1" sx={{ color: '#f9fafb', mt: 0.5 }}>
-                    {selectedPrediction.rul_hours.toFixed(1)} hours ({(selectedPrediction.rul_hours / 24).toFixed(1)} days)
-                  </Typography>
-                </Box>
-
-                <Box>
-                  <Typography variant="caption" sx={{ color: '#9ca3af' }}>
-                    Urgency Level
-                  </Typography>
-                  <Box sx={{ mt: 0.5 }}>
-                    <Chip
-                      label={selectedPrediction.urgency}
+                    <Typography
+                      variant="body2"
+                      component="pre"
                       sx={{
-                        bgcolor: `${getUrgencyColor(selectedPrediction.urgency)}20`,
-                        color: getUrgencyColor(selectedPrediction.urgency),
-                        borderColor: getUrgencyColor(selectedPrediction.urgency),
-                        border: '1px solid',
-                        fontWeight: 600,
+                        color: '#d1d5db',
+                        mt: 0.5,
+                        p: 1,
+                        borderRadius: 1,
+                        bgcolor: 'rgba(0,0,0,0.25)',
+                        maxHeight: 180,
+                        overflow: 'auto',
+                        whiteSpace: 'pre-wrap',
+                        fontFamily:
+                          'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
                       }}
-                    />
+                    >
+                      {JSON.stringify((runDetails?.sensor_data || selectedPrediction.sensor_snapshot || {}), null, 2)}
+                    </Typography>
                   </Box>
-                </Box>
+                )}
+
+                {runDetails && (
+                  <>
+                    <Box>
+                      <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                        Predictions (All)
+                      </Typography>
+                      <Typography
+                        variant="body2"
+                        component="pre"
+                        sx={{
+                          color: '#d1d5db',
+                          mt: 0.5,
+                          p: 1,
+                          borderRadius: 1,
+                          bgcolor: 'rgba(0,0,0,0.25)',
+                          maxHeight: 200,
+                          overflow: 'auto',
+                          whiteSpace: 'pre-wrap',
+                          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                        }}
+                      >
+                        {JSON.stringify(runDetails.predictions || {}, null, 2)}
+                      </Typography>
+                    </Box>
+
+                    <Box>
+                      <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                        LLM Outputs (All)
+                      </Typography>
+                      <Typography
+                        variant="body2"
+                        component="pre"
+                        sx={{
+                          color: '#d1d5db',
+                          mt: 0.5,
+                          p: 1,
+                          borderRadius: 1,
+                          bgcolor: 'rgba(0,0,0,0.25)',
+                          maxHeight: 220,
+                          overflow: 'auto',
+                          whiteSpace: 'pre-wrap',
+                          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                        }}
+                      >
+                        {JSON.stringify(runDetails.llm || {}, null, 2)}
+                      </Typography>
+                    </Box>
+                  </>
+                )}
               </Stack>
             </DialogContent>
             <DialogActions sx={{ borderTop: '1px solid rgba(255, 255, 255, 0.1)', p: 2 }}>

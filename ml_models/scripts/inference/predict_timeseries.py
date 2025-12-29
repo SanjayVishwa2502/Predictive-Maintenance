@@ -65,9 +65,9 @@ class TimeSeriesPredictor:
             print(f"Loading time-series forecasting model for {self.machine_id}...")
             self.model = joblib.load(prophet_models_path)
             
-            print(f"✓ Model loaded successfully")
+            print(f"[OK] Model loaded successfully")
             if isinstance(self.model, dict):
-                print(f"✓ Loaded {len(self.model)} Prophet models for different sensors")
+                print(f"[OK] Loaded {len(self.model)} Prophet models for different sensors")
             
         except Exception as e:
             raise RuntimeError(f"Failed to load time-series model: {e}")

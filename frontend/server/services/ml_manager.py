@@ -31,8 +31,10 @@ logger = logging.getLogger(__name__)
 
 # Add project paths
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-LLM_PATH = PROJECT_ROOT / "LLM"
-sys.path.insert(0, str(LLM_PATH))
+
+# Ensure the repo root is importable so we can import `LLM.*` without
+# colliding with the backend's own `api.*` package.
+sys.path.insert(0, str(PROJECT_ROOT))
 
 
 @dataclass
@@ -62,6 +64,35 @@ class RULResult:
     explanation: Optional[str] = None
     timestamp: str = None
     
+    def __post_init__(self):
+        if self.timestamp is None:
+            self.timestamp = datetime.now().isoformat()
+
+
+@dataclass
+class AnomalyResult:
+    """Anomaly detection result"""
+    machine_id: str
+    is_anomaly: bool
+    anomaly_score: float
+    detection_method: str
+    abnormal_sensors: Dict[str, float]
+    timestamp: str = None
+
+    def __post_init__(self):
+        if self.timestamp is None:
+            self.timestamp = datetime.now().isoformat()
+
+@dataclass
+class TimeSeriesResult:
+    """Time-series forecast result"""
+    machine_id: str
+    forecast_summary: str
+    confidence: float
+    forecast_horizon: str
+    forecasts: Dict[str, Any]
+    timestamp: str = None
+
     def __post_init__(self):
         if self.timestamp is None:
             self.timestamp = datetime.now().isoformat()
@@ -125,7 +156,7 @@ class MLManager:
     def _load_integrated_system(self):
         """Load IntegratedPredictionSystem (LLM + ML models)"""
         try:
-            from api.ml_integration import IntegratedPredictionSystem
+            from LLM.api.ml_integration import IntegratedPredictionSystem
             self.integrated_system = IntegratedPredictionSystem()
             logger.info("[OK] IntegratedPredictionSystem loaded successfully")
         except Exception as e:
@@ -410,43 +441,81 @@ class MLManager:
                 "ML predictions are disabled. Check server logs for details."
             )
         
-        # Allow predictions even if GAN metadata is missing, as long as model artifacts exist.
         classification_path = self.models_dir / "classification" / machine_id
-        if not self._has_model_artifacts(classification_path):
-            raise FileNotFoundError(
-                f"Classification model not found or empty for {machine_id}. Expected: {classification_path}"
-            )
+        has_model = self._has_model_artifacts(classification_path)
         
-        logger.info(f"Running classification prediction for {machine_id}")
+        logger.info(f"Running classification prediction for {machine_id} (model={'yes' if has_model else 'no'})")
         
         try:
-            # Run prediction with explanation
-            result = self.integrated_system.predict_with_explanation(
-                machine_id=machine_id,
-                sensor_data=sensor_data,
-                model_type='classification'
-            )
-            
-            classification_block = result.get('classification', {}) if isinstance(result, dict) else {}
-            if isinstance(classification_block, dict) and classification_block.get('error'):
-                raise RuntimeError(classification_block.get('error'))
+            # If we have a trained model, use it. Otherwise, fall back to a lightweight heuristic
+            # so the frontend doesn't hard-fail for machines without models.
+            if has_model:
+                # NOTE: Keep this endpoint fast. LLM explanations are generated separately
+                # via /api/llm/explain (async Celery worker) and shown in the UI.
+                pred = self.integrated_system.predict_classification(
+                    machine_id=machine_id,
+                    sensor_data=sensor_data,
+                )
+                return ClassificationResult(
+                    machine_id=machine_id,
+                    failure_type=pred.get('failure_type', 'unknown'),
+                    confidence=float(pred.get('confidence', 0.0) or 0.0),
+                    failure_probability=float(pred.get('failure_probability', 0.0) or 0.0),
+                    all_probabilities=pred.get('all_probabilities', {}) or {},
+                    explanation='',
+                )
 
-            pred = classification_block.get('prediction', {}) if isinstance(classification_block, dict) else {}
-            explanation_block = classification_block.get('explanation', {}) if isinstance(classification_block, dict) else {}
+            # ---------- Fallback path (no model artifacts) ----------
+            values = sensor_data or {}
+            # Heuristic type detection based on common sensor names.
+            sensor_lower = {str(k).lower(): float(v) for k, v in values.items() if v is not None}
+
+            temp_vals = [v for k, v in sensor_lower.items() if 'temp' in k]
+            vib_vals = [v for k, v in sensor_lower.items() if 'vib' in k or 'vibration' in k]
+            elec_vals = [v for k, v in sensor_lower.items() if 'current' in k or 'amp' in k or 'voltage' in k]
+
+            max_val = max([abs(v) for v in sensor_lower.values()], default=0.0)
+            # Simple bounded risk score in [0.05, 0.95]
+            failure_probability = max(0.05, min(0.95, max_val / (max_val + 50.0) if max_val > 0 else 0.1))
+
+            failure_type = 'normal'
+            if temp_vals and max(temp_vals) >= 80:
+                failure_type = 'overheating'
+            elif vib_vals and max(vib_vals) >= 10:
+                failure_type = 'bearing_wear'
+            elif elec_vals and max(elec_vals) >= 20:
+                failure_type = 'electrical_fault'
+            elif failure_probability >= 0.35:
+                failure_type = 'bearing_wear'
+
+            # Distribute probabilities across known labels.
+            base = {
+                'normal': max(0.0, 1.0 - failure_probability),
+                'bearing_wear': 0.0,
+                'overheating': 0.0,
+                'electrical_fault': 0.0,
+            }
+            base[failure_type] = max(base.get(failure_type, 0.0), failure_probability)
+            s = sum(base.values()) or 1.0
+            all_probabilities = {k: float(v / s) for k, v in base.items()}
+
+            confidence = 0.55
             explanation_text = (
-                explanation_block.get('summary')
-                if isinstance(explanation_block, dict)
-                else (classification_block.get('explanation') if isinstance(classification_block, dict) else '')
+                f"Heuristic prediction (no trained model found for {machine_id}).\n\n"
+                f"Predicted failure type: {failure_type}\n"
+                f"Failure probability: {failure_probability:.2f}\n"
+                "LLM explanation is generated separately."
             )
 
             return ClassificationResult(
                 machine_id=machine_id,
-                failure_type=pred.get('failure_type', 'unknown'),
-                confidence=float(pred.get('confidence', 0.0) or 0.0),
-                failure_probability=float(pred.get('failure_probability', 0.0) or 0.0),
-                all_probabilities=pred.get('all_probabilities', {}) or {},
-                explanation=explanation_text or '',
+                failure_type=failure_type,
+                confidence=confidence,
+                failure_probability=float(all_probabilities.get(failure_type, failure_probability)),
+                all_probabilities=all_probabilities,
+                explanation=explanation_text,
             )
+            
         except Exception as e:
             logger.error(f"Classification prediction failed: {e}")
             raise RuntimeError(f"Prediction failed: {str(e)}")
@@ -486,24 +555,9 @@ class MLManager:
         logger.info(f"Running RUL prediction for {machine_id}")
         
         try:
-            # Run prediction with explanation
-            result = self.integrated_system.predict_with_explanation(
-                machine_id=machine_id,
-                sensor_data=sensor_data,
-                model_type='regression'
-            )
-            
-            regression_block = result.get('regression', {}) if isinstance(result, dict) else {}
-            if isinstance(regression_block, dict) and regression_block.get('error'):
-                raise RuntimeError(regression_block.get('error'))
-
-            pred = regression_block.get('prediction', {}) if isinstance(regression_block, dict) else {}
-            explanation_block = regression_block.get('explanation', {}) if isinstance(regression_block, dict) else {}
-            explanation_text = (
-                explanation_block.get('summary')
-                if isinstance(explanation_block, dict)
-                else (regression_block.get('explanation') if isinstance(regression_block, dict) else '')
-            )
+            # IMPORTANT: do NOT generate LLM explanations in the request path.
+            # Explanations are generated asynchronously via Celery (/api/llm/explain).
+            pred = self.integrated_system.predict_rul(machine_id=machine_id, sensor_data=sensor_data)
 
             rul_hours = float(pred.get('rul_hours', 0.0) or 0.0)
             rul_days = rul_hours / 24.0
@@ -524,10 +578,86 @@ class MLManager:
                 rul_days=round(rul_days, 2),
                 urgency=urgency,
                 confidence=float(pred.get('confidence', 0.0) or 0.0),
-                explanation=explanation_text or ''
+                explanation=''
             )
         except Exception as e:
             logger.error(f"RUL prediction failed: {e}")
+            raise RuntimeError(f"Prediction failed: {str(e)}")
+
+    def predict_anomaly(
+        self,
+        machine_id: str,
+        sensor_data: Optional[Dict[str, float]],
+    ) -> AnomalyResult:
+        """Run anomaly detection (prediction-only)."""
+        if self.integrated_system is None:
+            raise RuntimeError(
+                "IntegratedPredictionSystem not available. "
+                "ML predictions are disabled. Check server logs for details."
+            )
+
+        anomaly_path = self.models_dir / "anomaly" / machine_id
+        has_model = self._has_model_artifacts(anomaly_path)
+        logger.info(f"Running anomaly detection for {machine_id} (model={'yes' if has_model else 'no'})")
+
+        try:
+            if not has_model:
+                return AnomalyResult(
+                    machine_id=machine_id,
+                    is_anomaly=False,
+                    anomaly_score=0.0,
+                    detection_method="unavailable",
+                    abnormal_sensors={},
+                )
+
+            pred = self.integrated_system.detect_anomaly(machine_id=machine_id, sensor_data=sensor_data)
+            return AnomalyResult(
+                machine_id=machine_id,
+                is_anomaly=bool(pred.get("is_anomaly", False)),
+                anomaly_score=float(pred.get("score", 0.0) or 0.0),
+                detection_method=str(pred.get("method") or "unknown"),
+                abnormal_sensors=pred.get("abnormal_sensors") or {},
+            )
+        except Exception as e:
+            logger.error(f"Anomaly prediction failed: {e}")
+            raise RuntimeError(f"Prediction failed: {str(e)}")
+
+    def predict_timeseries(
+        self,
+        machine_id: str,
+        sensor_data: Optional[Dict[str, float]],
+    ) -> TimeSeriesResult:
+        """Run time-series forecast (prediction-only)."""
+        if self.integrated_system is None:
+            raise RuntimeError(
+                "IntegratedPredictionSystem not available. "
+                "ML predictions are disabled. Check server logs for details."
+            )
+
+        timeseries_path = self.models_dir / "timeseries" / machine_id
+        has_model = self._has_model_artifacts(timeseries_path)
+        logger.info(f"Running timeseries forecast for {machine_id} (model={'yes' if has_model else 'no'})")
+
+        try:
+            if not has_model:
+                return TimeSeriesResult(
+                    machine_id=machine_id,
+                    forecast_summary="Time-series model not available for this machine.",
+                    confidence=0.0,
+                    forecast_horizon="",
+                    forecasts={},
+                )
+
+            pred = self.integrated_system.predict_forecast(machine_id=machine_id, sensor_data=sensor_data)
+            return TimeSeriesResult(
+                machine_id=machine_id,
+                forecast_summary=str(pred.get("forecast_summary") or "Forecast generated"),
+                confidence=float(pred.get("confidence", 0.0) or 0.0),
+                forecast_horizon=str(pred.get("forecast_horizon") or ""),
+                forecasts=pred.get("forecasts") or {},
+            )
+        except Exception as e:
+            logger.error(f"Timeseries prediction failed: {e}")
             raise RuntimeError(f"Prediction failed: {str(e)}")
     
     def get_health(self) -> Dict[str, Any]:
@@ -537,39 +667,50 @@ class MLManager:
         Returns:
             Dictionary with service health information
         """
-        health = {
-            'status': 'healthy' if self.integrated_system else 'degraded',
-            'ml_system_available': self.integrated_system is not None,
+        integrated_ready = self.integrated_system is not None
+        health: Dict[str, Any] = {
+            'status': 'healthy' if integrated_ready else 'degraded',
+            'models_loaded': {
+                'classification': 0,
+                'regression': 0,
+                'anomaly': 0,
+                'timeseries': 0,
+            },
+            'llm_status': 'available' if integrated_ready else 'unavailable',
+            'gpu_available': False,
+            'gpu_info': None,
+            'integrated_system_ready': integrated_ready,
             'models_directory': str(self.models_dir),
             'models_directory_exists': self.models_dir.exists(),
             'machines_loaded': len(self.machine_metadata),
-            'timestamp': datetime.now().isoformat()
+            'timestamp': datetime.now().isoformat(),
         }
         
         # Add model counts if available
         if self.models_dir.exists():
             classification_models = list((self.models_dir / "classification").glob("*"))
             regression_models = list((self.models_dir / "regression").glob("*"))
-            
-            health['model_counts'] = {
+            anomaly_models = list((self.models_dir / "anomaly").glob("*"))
+            timeseries_models = list((self.models_dir / "timeseries").glob("*"))
+
+            health['models_loaded'] = {
                 'classification': len([m for m in classification_models if m.is_dir()]),
                 'regression': len([m for m in regression_models if m.is_dir()]),
-                'anomaly': 0,  # Not yet implemented
-                'timeseries': 0  # Not yet implemented
+                'anomaly': len([m for m in anomaly_models if m.is_dir()]),
+                'timeseries': len([m for m in timeseries_models if m.is_dir()]),
             }
         
-        # Add GPU info if IntegratedPredictionSystem loaded
-        if self.integrated_system:
-            try:
-                import torch
-                health['gpu_available'] = torch.cuda.is_available()
-                if torch.cuda.is_available():
-                    health['gpu_info'] = {
-                        'name': torch.cuda.get_device_name(0),
-                        'cuda_version': torch.version.cuda
-                    }
-            except:
-                pass
+        # Add GPU info if available
+        try:
+            import torch
+            health['gpu_available'] = bool(torch.cuda.is_available())
+            if health['gpu_available']:
+                health['gpu_info'] = {
+                    'name': torch.cuda.get_device_name(0),
+                    'cuda_version': torch.version.cuda,
+                }
+        except Exception:
+            pass
         
         return health
     

@@ -212,6 +212,8 @@ class MachineStatusResponse(BaseModel):
     is_running: bool = Field(..., description="Whether machine is currently running")
     latest_sensors: Dict[str, float] = Field(..., description="Latest sensor readings")
     last_update: datetime = Field(..., description="Timestamp of last sensor update")
+    data_stamp: Optional[str] = Field(None, description="Stable UTC data stamp for this snapshot (ISO8601)")
+    run_id: Optional[str] = Field(None, description="Prediction run id associated with this snapshot (if any)")
     sensor_count: int = Field(..., description="Number of sensors", ge=0)
     
     class Config:
@@ -228,6 +230,8 @@ class MachineStatusResponse(BaseModel):
                     "voltage_phase_to_phase_V": 410.0
                 },
                 "last_update": "2025-12-15T10:45:23Z",
+                "data_stamp": "2025-12-15T10:45:23Z",
+                "run_id": "5dd0d7f5-6a41-4ba0-8f6a-83b886d58c77",
                 "sensor_count": 22
             }
         }
@@ -366,6 +370,48 @@ class RULResponse(BaseModel):
                 "timestamp": "2025-12-15T10:45:23Z"
             }
         }
+
+
+# ============================================================
+# Response Models - Anomaly Detection
+# ============================================================
+
+
+class AnomalyPrediction(BaseModel):
+    """Anomaly detection results"""
+    is_anomaly: bool = Field(..., description="Whether the reading is anomalous")
+    anomaly_score: float = Field(..., description="Anomaly score (0-1)")
+    detection_method: str = Field(..., description="Detection method used")
+    abnormal_sensors: Dict[str, float] = Field(..., description="Sensors contributing to anomaly")
+
+
+class AnomalyResponse(BaseModel):
+    """Response model for anomaly detection"""
+    machine_id: str = Field(..., description="Machine identifier")
+    prediction: AnomalyPrediction = Field(..., description="Anomaly detection results")
+    explanation: ExplanationInfo = Field(..., description="LLM explanation")
+    timestamp: datetime = Field(..., description="Prediction timestamp")
+
+
+# ============================================================
+# Response Models - Time-series Forecast
+# ============================================================
+
+
+class TimeSeriesPrediction(BaseModel):
+    """Time-series forecast results"""
+    forecast_summary: str = Field(..., description="Human-readable forecast summary")
+    confidence: float = Field(..., description="Forecast confidence", ge=0.0, le=1.0)
+    forecast_horizon: str = Field(..., description="Forecast horizon")
+    forecasts: Dict[str, Any] = Field(..., description="Optional structured forecast outputs")
+
+
+class TimeSeriesResponse(BaseModel):
+    """Response model for time-series forecast"""
+    machine_id: str = Field(..., description="Machine identifier")
+    prediction: TimeSeriesPrediction = Field(..., description="Forecast results")
+    explanation: ExplanationInfo = Field(..., description="LLM explanation")
+    timestamp: datetime = Field(..., description="Prediction timestamp")
 
 
 # ============================================================

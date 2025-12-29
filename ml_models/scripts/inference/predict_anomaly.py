@@ -29,6 +29,141 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 sys.path.append(str(PROJECT_ROOT))
 
 
+# -----------------------------------------------------------------------------
+# Pickle compatibility shim (Windows + uvicorn)
+# -----------------------------------------------------------------------------
+# Some older anomaly models were serialized with classes defined in a training
+# script executed as "__main__". When running under uvicorn on Windows,
+# "__main__" is uvicorn.exe, so unpickling fails with:
+#   Can't get attribute 'StatisticalAnomalyDetector' on <module '__main__' ...>
+# To keep existing model artifacts working, we provide the class here and
+# register it onto the __main__ module before joblib.load().
+
+
+class StatisticalAnomalyDetector:
+    """Statistical anomaly detection using Z-score, IQR, and Modified Z-score."""
+
+    def __init__(self, method: str = 'zscore', threshold: float = 3.0):
+        self.method = method
+        self.threshold = threshold
+        self.stats: Dict[str, np.ndarray] = {}
+
+    def fit(self, X: np.ndarray):
+        """Compute statistics from normal data."""
+        if self.method == 'zscore':
+            self.stats['mean'] = np.mean(X, axis=0)
+            self.stats['std'] = np.std(X, axis=0)
+
+        elif self.method == 'iqr':
+            self.stats['q1'] = np.percentile(X, 25, axis=0)
+            self.stats['q3'] = np.percentile(X, 75, axis=0)
+            self.stats['iqr'] = self.stats['q3'] - self.stats['q1']
+
+        elif self.method == 'modified_zscore':
+            self.stats['median'] = np.median(X, axis=0)
+            self.stats['mad'] = np.median(np.abs(X - self.stats['median']), axis=0)
+
+        return self
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """Predict: 1 for normal, -1 for anomaly."""
+        if self.method == 'zscore':
+            z_scores = np.abs((X - self.stats['mean']) / (self.stats['std'] + 1e-10))
+            anomaly_scores = np.max(z_scores, axis=1)
+
+        elif self.method == 'iqr':
+            lower_bound = self.stats['q1'] - self.threshold * self.stats['iqr']
+            upper_bound = self.stats['q3'] + self.threshold * self.stats['iqr']
+            outliers = (X < lower_bound) | (X > upper_bound)
+            anomaly_scores = np.sum(outliers, axis=1) / X.shape[1]
+
+        elif self.method == 'modified_zscore':
+            modified_z = 0.6745 * np.abs(X - self.stats['median']) / (self.stats['mad'] + 1e-10)
+            anomaly_scores = np.max(modified_z, axis=1)
+
+        else:
+            anomaly_scores = np.zeros((X.shape[0],), dtype=float)
+
+        return np.where(anomaly_scores > self.threshold, -1, 1)
+
+    def decision_function(self, X: np.ndarray) -> np.ndarray:
+        """Return anomaly scores (higher = more anomalous)."""
+        if self.method == 'zscore':
+            z_scores = np.abs((X - self.stats['mean']) / (self.stats['std'] + 1e-10))
+            return np.max(z_scores, axis=1)
+        if self.method == 'iqr':
+            lower_bound = self.stats['q1'] - self.threshold * self.stats['iqr']
+            upper_bound = self.stats['q3'] + self.threshold * self.stats['iqr']
+            outliers = (X < lower_bound) | (X > upper_bound)
+            return np.sum(outliers, axis=1) / X.shape[1]
+        if self.method == 'modified_zscore':
+            modified_z = 0.6745 * np.abs(X - self.stats['median']) / (self.stats['mad'] + 1e-10)
+            return np.max(modified_z, axis=1)
+        return np.zeros((X.shape[0],), dtype=float)
+
+
+class EnsembleAnomalyDetector:
+    """Ensemble of multiple anomaly detectors with voting.
+
+    Pickle compatibility shim:
+    - Older model artifacts may reference "__main__.EnsembleAnomalyDetector".
+    - Under uvicorn on Windows, __main__ is uvicorn.exe, so we provide this
+      symbol here and register it into __main__ before unpickling.
+    """
+
+    def __init__(self, detectors=None, method: str = 'majority_vote'):
+        self.detectors = detectors or {}
+        self.method = method
+
+    def fit(self, X: np.ndarray):
+        for _name, detector in (self.detectors or {}).items():
+            try:
+                detector.fit(X)
+            except Exception:
+                continue
+        return self
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        predictions = []
+        for detector in (self.detectors or {}).values():
+            pred = detector.predict(X)
+            # Convert to binary: -1 (anomaly) -> 1, 1 (normal) -> 0
+            binary_pred = (pred == -1).astype(int)
+            predictions.append(binary_pred)
+
+        if not predictions:
+            return np.ones((X.shape[0],), dtype=int)
+
+        predictions = np.array(predictions)
+
+        if self.method == 'majority_vote':
+            votes = np.sum(predictions, axis=0)
+            ensemble_pred = (votes > predictions.shape[0] / 2).astype(int)
+        elif self.method == 'unanimous':
+            ensemble_pred = np.all(predictions, axis=0).astype(int)
+        elif self.method == 'any':
+            ensemble_pred = np.any(predictions, axis=0).astype(int)
+        else:
+            votes = np.sum(predictions, axis=0)
+            ensemble_pred = (votes > predictions.shape[0] / 2).astype(int)
+
+        return np.where(ensemble_pred == 1, -1, 1)
+
+    def decision_function(self, X: np.ndarray) -> np.ndarray:
+        scores = []
+        for detector in (self.detectors or {}).values():
+            if hasattr(detector, 'decision_function'):
+                score = detector.decision_function(X)
+            else:
+                # Convert to anomaly score if only score_samples is available
+                score = detector.score_samples(X) * -1
+            scores.append(score)
+
+        if not scores:
+            return np.zeros((X.shape[0],), dtype=float)
+        return np.mean(scores, axis=0)
+
+
 class AnomalyPredictor:
     """Loads and runs inference with trained anomaly detection models"""
     
@@ -60,6 +195,15 @@ class AnomalyPredictor:
             # Load all detectors using joblib (sklearn models)
             import joblib
             import sys
+            import __main__
+
+            # Register pickle compatibility shims onto __main__.
+            # This enables loading models serialized with "__main__.StatisticalAnomalyDetector".
+            if not hasattr(__main__, 'StatisticalAnomalyDetector'):
+                setattr(__main__, 'StatisticalAnomalyDetector', StatisticalAnomalyDetector)
+            # This enables loading models serialized with "__main__.EnsembleAnomalyDetector".
+            if not hasattr(__main__, 'EnsembleAnomalyDetector'):
+                setattr(__main__, 'EnsembleAnomalyDetector', EnsembleAnomalyDetector)
             
             # Add ml_models to path to handle any custom imports
             ml_models_path = str(Path(__file__).resolve().parents[2])
@@ -74,10 +218,11 @@ class AnomalyPredictor:
                 if isinstance(model_data, dict) and 'detectors' in model_data:
                     self.detectors = model_data['detectors']
                     self.preprocessing = model_data.get('scaler')  # Use scaler as preprocessing
-                    print(f"✓ Loaded {len(self.detectors)} detectors: {list(self.detectors.keys())}")
+                    # Avoid printing detector keys (may contain non-ASCII and crash Windows consoles)
+                    print(f"[OK] Loaded {len(self.detectors)} detectors")
                 else:
                     self.detectors = model_data
-                    print(f"✓ Loaded {len(self.detectors)} detectors")
+                    print(f"[OK] Loaded {len(self.detectors)} detectors")
             else:
                 # Load individual detectors
                 detector_files = {
@@ -91,7 +236,7 @@ class AnomalyPredictor:
                     detector_path = self.model_path / filename
                     if detector_path.exists():
                         self.detectors[name] = joblib.load(detector_path)
-                        print(f"✓ Loaded {name}")
+                        print(f"[OK] Loaded {name}")
             
             if not self.detectors:
                 raise RuntimeError("No anomaly detectors found")
@@ -101,7 +246,7 @@ class AnomalyPredictor:
                 preprocessing_path = self.model_path / "preprocessing.pkl"
                 if preprocessing_path.exists():
                     self.preprocessing = joblib.load(preprocessing_path)
-                    print("✓ Loaded preprocessing pipeline")
+                    print("[OK] Loaded preprocessing pipeline")
             
             # Load feature names
             features_path = self.model_path / "features.json"
@@ -112,9 +257,9 @@ class AnomalyPredictor:
                         self.feature_names = data['features']
                     else:
                         self.feature_names = data
-                print(f"✓ Loaded {len(self.feature_names)} feature names")
+                print(f"[OK] Loaded {len(self.feature_names)} feature names")
             
-            print("✓ Anomaly detection models loaded successfully\n")
+            print("[OK] Anomaly detection models loaded successfully\n")
             
         except Exception as e:
             raise RuntimeError(f"Failed to load anomaly detection models: {e}")
@@ -206,7 +351,7 @@ class AnomalyPredictor:
                         abnormal_detectors.append(detector_name)
                 
                 except Exception as e:
-                    print(f"⚠️  {detector_name} failed: {e}")
+                    print(f"[WARN] {detector_name} failed: {e}")
                     detector_scores[detector_name] = 0.0
                     detector_predictions[detector_name] = 1
             
@@ -328,7 +473,7 @@ class AnomalyPredictor:
                 result = self.predict(sensor_data)
                 results.append(result)
             except Exception as e:
-                print(f"⚠️  Prediction {i+1} failed: {e}")
+                print(f"[WARN] Prediction {i+1} failed: {e}")
                 results.append({
                     "machine_id": self.machine_id,
                     "timestamp": datetime.utcnow().isoformat() + "Z",
@@ -355,7 +500,7 @@ def load_sample_data(machine_id: str, num_samples: int = 10) -> List[Dict[str, f
         data_path = PROJECT_ROOT / "GAN" / "data" / "synthetic" / machine_id / "train.parquet"
         
         if not data_path.exists():
-            print(f"⚠️  Synthetic data not found: {data_path}")
+            print(f"[WARN] Synthetic data not found: {data_path}")
             print("Generating test sensor data...")
             return generate_test_data(machine_id, num_samples)
         
@@ -390,11 +535,11 @@ def load_sample_data(machine_id: str, num_samples: int = 10) -> List[Dict[str, f
         # Convert to list of dictionaries
         sensor_data_list = combined_df.to_dict('records')
         
-        print(f"✓ Loaded {len(sensor_data_list)} samples ({num_samples//2} normal, {num_samples - num_samples//2} anomalous)")
+        print(f"[OK] Loaded {len(sensor_data_list)} samples ({num_samples//2} normal, {num_samples - num_samples//2} anomalous)")
         return sensor_data_list
         
     except Exception as e:
-        print(f"⚠️  Error loading sample data: {e}")
+        print(f"[WARN] Error loading sample data: {e}")
         print("Generating test sensor data...")
         return generate_test_data(machine_id, num_samples)
 
@@ -492,11 +637,11 @@ def main():
                     print(f"   Abnormal Sensors: {pred['abnormal_sensors'][0]}")
         
         print("\n" + "="*60)
-        print("✓ ANOMALY DETECTION INFERENCE COMPLETE")
+        print("[OK] ANOMALY DETECTION INFERENCE COMPLETE")
         print("="*60)
         
     except Exception as e:
-        print(f"\n❌ Error: {e}")
+        print(f"\n[ERROR] {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

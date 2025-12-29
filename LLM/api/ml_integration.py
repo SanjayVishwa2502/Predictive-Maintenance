@@ -34,13 +34,9 @@ try:
 except Exception as e:
     print(f"Warning: Could not setup CUDA paths: {e}")
 
-# Add LLM root to path to allow imports
-sys.path.append(str(Path(__file__).resolve().parents[1]))
-
-try:
-    from api.explainer import MLExplainer
-except ImportError:
-    from explainer import MLExplainer
+# Import explainer from the local package.
+# Using relative import avoids collisions with the backend's own `api` package.
+from .explainer import MLExplainer
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -87,7 +83,7 @@ class IntegratedPredictionSystem:
         self.models_dir = PROJECT_ROOT / "ml_models" / "models"
         
         print("\n" + "="*70)
-        print("✓ IntegratedPredictionSystem Ready")
+        print("[OK] IntegratedPredictionSystem Ready")
         print("="*70)
         print()
     
@@ -138,10 +134,10 @@ class IntegratedPredictionSystem:
                     'prediction': pred,
                     'explanation': explanation
                 }
-                print(f"[Classification] ✓ Complete\n")
+                print(f"[Classification] [OK] Complete\n")
                 
             except Exception as e:
-                print(f"[Classification] ✗ Error: {e}\n")
+                print(f"[Classification] [X] Error: {e}\n")
                 results['classification'] = {'error': str(e)}
         
         # Regression (RUL)
@@ -162,10 +158,10 @@ class IntegratedPredictionSystem:
                     'prediction': rul,
                     'explanation': explanation
                 }
-                print(f"[RUL] ✓ Complete\n")
+                print(f"[RUL] [OK] Complete\n")
                 
             except Exception as e:
-                print(f"[RUL] ✗ Error: {e}\n")
+                print(f"[RUL] [X] Error: {e}\n")
                 results['regression'] = {'error': str(e)}
         
         # Anomaly Detection (Real models)
@@ -187,16 +183,16 @@ class IntegratedPredictionSystem:
                         'prediction': anomaly,
                         'explanation': explanation
                     }
-                    print(f"[Anomaly] ✓ Complete\n")
+                    print(f"[Anomaly] [OK] Complete\n")
                 else:
                     results['anomaly'] = {
                         'prediction': anomaly,
                         'explanation': {'note': 'No anomaly detected - explanation not needed'}
                     }
-                    print(f"[Anomaly] ✓ No anomaly detected\n")
+                    print(f"[Anomaly] [OK] No anomaly detected\n")
                     
             except Exception as e:
-                print(f"[Anomaly] ✗ Error: {e}\n")
+                print(f"[Anomaly] [X] Error: {e}\n")
                 results['anomaly'] = {'error': str(e)}
         
         # Time-Series Forecast (Real Prophet models)
@@ -216,14 +212,14 @@ class IntegratedPredictionSystem:
                     'prediction': forecast,
                     'explanation': explanation
                 }
-                print(f"[TimeSeries] ✓ Complete\n")
+                print(f"[TimeSeries] [OK] Complete\n")
                 
             except Exception as e:
-                print(f"[TimeSeries] ✗ Error: {e}\n")
+                print(f"[TimeSeries] [X] Error: {e}\n")
                 results['timeseries'] = {'error': str(e)}
         
         print(f"{'='*70}")
-        print(f"✓ Integrated prediction complete ({len(results)} model types)")
+        print(f"[OK] Integrated prediction complete ({len(results)} model types)")
         print(f"{'='*70}\n")
         
         return results
@@ -510,5 +506,5 @@ if __name__ == "__main__":
                     print(f"\nExplanation: {exp}")
     
     print("\n" + "="*70)
-    print("✓ TEST COMPLETE")
+    print("[OK] TEST COMPLETE")
     print("="*70)

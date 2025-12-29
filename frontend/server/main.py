@@ -117,7 +117,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 # ============================================================================
 
 # Import routers
-from api.routes import auth, gan, websocket, ml, ml_training
+from api.routes import auth, gan, websocket, ml, ml_training, llm
 
 # Include routers with proper prefixes and tags
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
@@ -128,7 +128,7 @@ app.include_router(websocket.router, tags=["WebSocket"])
 
 # TODO: Add remaining routers as implemented
 # from api.routes import llm, dashboard
-# app.include_router(llm.router, prefix="/api/llm", tags=["LLM"])
+app.include_router(llm.router, tags=["LLM"])
 # app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
 
 # ============================================================================

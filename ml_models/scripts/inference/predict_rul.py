@@ -62,9 +62,9 @@ class RULPredictor:
             # Extract feature names from model
             self.feature_names = self.model.feature_metadata.get_features()
             
-            print(f"✓ Model loaded successfully")
-            print(f"✓ Features: {len(self.feature_names)}")
-            print(f"✓ Target: {self.model.label} (Remaining Useful Life)")
+            print(f"[OK] Model loaded successfully")
+            print(f"[OK] Features: {len(self.feature_names)}")
+            print(f"[OK] Target: {self.model.label} (Remaining Useful Life)")
             
         except Exception as e:
             raise RuntimeError(f"Failed to load RUL regression model: {e}")

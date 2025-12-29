@@ -130,6 +130,10 @@ Write-ColorOutput ""
 # ============================================================================
 Write-ColorOutput "[STARTUP] Launching services in background..." "Green"
 
+# Optional: start a simple monitor that logs API/port up/down transitions.
+# Set env var PM_MONITOR_ON_START=1 to enable.
+$MonitorOnStart = ($env:PM_MONITOR_ON_START -eq "1")
+
 # 1. Backend (FastAPI) - System PowerShell Window
 Write-ColorOutput "[1/4] Starting Backend Server (FastAPI)..." "Green"
 $backendLog = "$LogDir\backend_$Timestamp.log"
@@ -142,7 +146,8 @@ Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powersh
 Write-ColorOutput "     Log: $backendLog" "Gray"
 
 # 2. Celery Worker - System PowerShell Window
-Write-ColorOutput "[2/4] Starting Celery Worker..." "Yellow"
+# Default worker handles GAN/ML and lightweight tasks.
+Write-ColorOutput "[2/5] Starting Celery Worker (default)..." "Yellow"
 $celeryLog = "$LogDir\celery_$Timestamp.log"
 $celeryPurgeCmd = ""
 if ($PurgeCeleryOnStart) {
@@ -150,23 +155,40 @@ if ($PurgeCeleryOnStart) {
     $celeryPurgeCmd = "Write-Host '=== CELERY PURGE (discarding pending tasks) ===' -ForegroundColor Yellow; celery -A celery_app purge -Q celery,gan -f; "
 }
 
-$celeryCmd = "cd '$ProjectRoot\frontend\server'; & '$ProjectRoot\venv\Scripts\Activate.ps1'; Write-Host '=== CELERY WORKER ===' -ForegroundColor Yellow; $celeryPurgeCmd celery -A celery_app worker --loglevel=info --pool=solo 2>&1 | Tee-Object -FilePath '$celeryLog'"
+$celeryCmd = "cd '$ProjectRoot\frontend\server'; & '$ProjectRoot\venv\Scripts\Activate.ps1'; Write-Host '=== CELERY WORKER (default) ===' -ForegroundColor Yellow; $celeryPurgeCmd celery -A celery_app worker --loglevel=info --pool=solo -Q celery,default,gan,ml 2>&1 | Tee-Object -FilePath '$celeryLog'"
 Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoExit", "-Command", $celeryCmd
 Write-ColorOutput "     Log: $celeryLog" "Gray"
 
-# 3. Flower (Celery Monitoring) - System PowerShell Window
-Write-ColorOutput "[3/4] Starting Flower (Celery Monitoring)..." "Magenta"
+# 3. Celery Worker (LLM) - System PowerShell Window
+# Dedicated queue for long CPU inference to avoid blocking other tasks.
+Write-ColorOutput "[3/5] Starting Celery Worker (LLM queue)..." "Yellow"
+$celeryLlmLog = "$LogDir\celery_llm_$Timestamp.log"
+$celeryLlmCmd = "cd '$ProjectRoot\frontend\server'; & '$ProjectRoot\venv\Scripts\Activate.ps1'; Write-Host '=== CELERY WORKER (llm) ===' -ForegroundColor Yellow; celery -A celery_app worker --loglevel=info --pool=solo -Q llm 2>&1 | Tee-Object -FilePath '$celeryLlmLog'"
+Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoExit", "-Command", $celeryLlmCmd
+Write-ColorOutput "     Log: $celeryLlmLog" "Gray"
+
+# 4. Flower (Celery Monitoring) - System PowerShell Window
+Write-ColorOutput "[4/5] Starting Flower (Celery Monitoring)..." "Magenta"
 $flowerLog = "$LogDir\flower_$Timestamp.log"
 $flowerCmd = "cd '$ProjectRoot\frontend\server'; & '$ProjectRoot\venv\Scripts\Activate.ps1'; Write-Host '=== FLOWER MONITORING (Port 5555) ===' -ForegroundColor Magenta; celery -A celery_app flower --port=5555 2>&1 | Tee-Object -FilePath '$flowerLog'"
 Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoExit", "-Command", $flowerCmd
 Write-ColorOutput "     Log: $flowerLog" "Gray"
 
-# 4. Frontend (Vite) - System PowerShell Window
-Write-ColorOutput "[4/4] Starting Frontend Server (React)..." "Cyan"
+# 5. Frontend (Vite) - System PowerShell Window
+Write-ColorOutput "[5/5] Starting Frontend Server (React)..." "Cyan"
 $frontendLog = "$LogDir\frontend_$Timestamp.log"
 $frontendCmd = "cd '$ProjectRoot\frontend\client'; Write-Host '=== FRONTEND SERVER (Port 5173) ===' -ForegroundColor Cyan; npm run dev 2>&1 | Tee-Object -FilePath '$frontendLog'"
 Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoExit", "-Command", $frontendCmd
 Write-ColorOutput "     Log: $frontendLog" "Gray"
+
+# 6. Monitor (optional)
+if ($MonitorOnStart) {
+    Write-ColorOutput "[MONITOR] Starting service monitor..." "Cyan"
+    $monitorLog = "$LogDir\monitor_$Timestamp.log"
+    $monitorCmd = "cd '$ProjectRoot'; Write-Host '=== SERVICE MONITOR ===' -ForegroundColor Cyan; powershell -NoProfile -ExecutionPolicy Bypass -File '$ProjectRoot\monitor_services.ps1' 2>&1 | Tee-Object -FilePath '$monitorLog'"
+    Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoExit", "-Command", $monitorCmd
+    Write-ColorOutput "     Log: $monitorLog" "Gray"
+}
 
 Write-ColorOutput ""
 

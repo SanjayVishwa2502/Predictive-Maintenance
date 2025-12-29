@@ -70,6 +70,117 @@ async def get_redis_pubsub():
     return redis_client
 
 
+def _safe_client_id(client_id: str) -> str:
+    cid = (client_id or "").strip()
+    if not cid:
+        return ""
+    return cid[:128]
+
+
+# ============================================================================
+# WEBSOCKET ENDPOINT: LLM EXPLANATION EVENTS (PUSH, NO POLLING)
+# ============================================================================
+
+
+@router.websocket("/ws/llm/events")
+async def llm_events_websocket(
+    websocket: WebSocket,
+    client_id: str = Query(..., description="Stable client id from dashboard (pm_client_id)")
+):
+    """Stream LLM completion events for a single client.
+
+    Celery tasks publish JSON messages to Redis channel: `llm:events:{client_id}`.
+    The dashboard connects once and receives push updates as soon as tasks finish.
+    """
+    await websocket.accept()
+
+    cid = _safe_client_id(client_id)
+    if not cid:
+        await websocket.close(code=1008)
+        return
+
+    channel = f"llm:events:{cid}"
+    redis_client = None
+    pubsub = None
+
+    logger.info(f"WebSocket connected for LLM events (client_id={cid})")
+
+    try:
+        await websocket.send_json(
+            {
+                "type": "connected",
+                "channel": channel,
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
+
+        redis_client = await get_redis_pubsub()
+        pubsub = redis_client.pubsub()
+        await pubsub.subscribe(channel)
+
+        # Some environments/proxies drop idle WebSockets. Send a lightweight
+        # heartbeat periodically to keep the connection alive.
+        last_heartbeat = datetime.now()
+
+        # Long-lived connection; rely on client disconnect.
+        while True:
+            try:
+                message = await asyncio.wait_for(
+                    pubsub.get_message(ignore_subscribe_messages=True),
+                    timeout=1.0,
+                )
+                if not message or message.get("type") != "message":
+                    continue
+
+                data = message.get("data")
+                try:
+                    payload = json.loads(data) if isinstance(data, str) else data
+                except Exception:
+                    payload = {"type": "error", "message": "Invalid event payload"}
+
+                await websocket.send_json(payload)
+
+            except asyncio.TimeoutError:
+                now = datetime.now()
+                if (now - last_heartbeat).total_seconds() >= 20:
+                    last_heartbeat = now
+                    try:
+                        await websocket.send_json({"type": "heartbeat", "timestamp": now.isoformat()})
+                    except Exception:
+                        # If heartbeat fails, let the outer handler close.
+                        raise
+                continue
+
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected for LLM events (client_id={cid})")
+
+    except Exception as e:
+        logger.error(f"WebSocket error for LLM events (client_id={cid}): {e}")
+        try:
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "message": f"Server error: {str(e)}",
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+        except Exception:
+            pass
+
+    finally:
+        if pubsub:
+            try:
+                await pubsub.unsubscribe(channel)
+                await pubsub.close()
+            except Exception:
+                pass
+        if redis_client:
+            try:
+                await redis_client.close()
+            except Exception:
+                pass
+
+
 # ============================================================================
 # WEBSOCKET ENDPOINT 1: GAN TRAINING PROGRESS
 # ============================================================================

@@ -68,9 +68,9 @@ class ClassificationPredictor:
             # Extract feature names from model
             self.feature_names = self.model.feature_metadata.get_features()
             
-            print(f"✓ Model loaded successfully")
-            print(f"✓ Features: {len(self.feature_names)}")
-            print(f"✓ Label column: {self.model.label}")
+            print(f"[OK] Model loaded successfully")
+            print(f"[OK] Features: {len(self.feature_names)}")
+            print(f"[OK] Label column: {self.model.label}")
             
         except Exception as e:
             raise RuntimeError(f"Failed to load classification model: {e}")

@@ -15,7 +15,7 @@ class MachineDocRetriever:
         # Load embedding model
         print("Loading sentence-transformers model...")
         self.model = SentenceTransformer('all-MiniLM-L6-v2')
-        print("✓ Model loaded")
+        print("[OK] Model loaded")
         
         # Load FAISS index
         project_root = Path(__file__).resolve().parents[3]
@@ -23,7 +23,7 @@ class MachineDocRetriever:
         
         print(f"Loading FAISS index from: {embeddings_dir}")
         self.index = faiss.read_index(str(embeddings_dir / "machines.index"))
-        print(f"✓ FAISS index loaded ({self.index.ntotal} vectors)")
+        print(f"[OK] FAISS index loaded ({self.index.ntotal} vectors)")
         
         # Load metadata
         print("Loading document metadata...")
@@ -31,9 +31,9 @@ class MachineDocRetriever:
             data = pickle.load(f)
             self.docs = data['docs']
             self.metadata = data['metadata']
-        print(f"✓ Metadata loaded ({len(self.docs)} documents)")
+        print(f"[OK] Metadata loaded ({len(self.docs)} documents)")
         
-        print("✓ Retriever ready!\n")
+        print("[OK] Retriever ready!\n")
     
     def retrieve(self, query, machine_id=None, top_k=3):
         """

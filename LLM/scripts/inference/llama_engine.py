@@ -1,6 +1,9 @@
-"""
-Test Llama 3.1 8B inference with llama.cpp (FAST & LIGHTWEIGHT)
-Phase 3.2.2: Basic Inference Testing
+"""LLama.cpp inference wrapper used by the backend LLM explainer.
+
+Notes (Windows):
+- Celery uses a separate worker process; model load happens once per worker.
+- CPU generation for 8B models can take tens of seconds. To reduce latency,
+  keep token budgets tight and avoid verbose llama.cpp logging.
 """
 import os
 import sys
@@ -21,7 +24,20 @@ if cublas_bin.exists():
     os.environ["PATH"] = str(cublas_bin) + ";" + os.environ["PATH"]
 
 from llama_cpp import Llama
+from llama_cpp import llama_cpp as _llama_cpp
 import time
+import multiprocessing
+
+
+def _supports_gpu_offload() -> bool:
+    """Best-effort check for whether this llama-cpp build supports GPU offload."""
+    try:
+        fn = getattr(_llama_cpp, "llama_supports_gpu_offload", None)
+        if callable(fn):
+            return bool(fn())
+    except Exception:
+        pass
+    return False
 
 class LlamaInference:
     def __init__(self):
@@ -32,70 +48,115 @@ class LlamaInference:
         if not model_file.exists():
             raise FileNotFoundError(f"Model not found: {model_file}")
         
-        print("="*60)
-        print("Phase 3.2.2: Testing Llama 3.1 8B Inference")
-        print("="*60)
-        print(f"Model: {model_file.name}")
-        print(f"Size: {model_file.stat().st_size / 1e9:.2f} GB")
-        print("\nLoading Llama 3.1 8B (llama.cpp)...")
+        self.verbose = (os.getenv("PM_LLM_VERBOSE", "0").strip() == "1")
+
+        if self.verbose:
+            print("="*60)
+            print("Phase 3.2.2: Testing Llama 3.1 8B Inference")
+            print("="*60)
+            print(f"Model: {model_file.name}")
+            print(f"Size: {model_file.stat().st_size / 1e9:.2f} GB")
+            print("\nLoading Llama 3.1 8B (llama.cpp)...")
         
         load_start = time.time()
         
         try:
+            self.supports_gpu_offload = _supports_gpu_offload()
+
+            # Only request GPU layers when supported; otherwise avoid needless attempts.
+            if self.supports_gpu_offload:
+                self.n_gpu_layers = int(os.getenv("PM_LLM_N_GPU_LAYERS", "-1"))
+            else:
+                self.n_gpu_layers = 0
+
+            default_threads = multiprocessing.cpu_count() or 4
+            self.n_threads = int(os.getenv("PM_LLM_THREADS", str(default_threads)))
+            self.n_threads_batch = int(os.getenv("PM_LLM_THREADS_BATCH", str(self.n_threads)))
+
+            # Keep batch moderate on CPU to reduce memory pressure.
+            self.n_ctx = int(os.getenv("PM_LLM_N_CTX", "2048"))
+            self.n_batch = int(os.getenv("PM_LLM_N_BATCH", "256"))
+
             self.model = Llama(
                 model_path=str(model_file),
-                n_gpu_layers=-1,  # Use all GPU layers (-1 = all)
-                n_ctx=2048,       # Context window
-                n_batch=512,      # Batch size
-                verbose=True      # Enable verbose logging to check CUDA status
+                n_gpu_layers=self.n_gpu_layers,  # -1 = attempt to offload all layers (if supported)
+                n_ctx=self.n_ctx,
+                n_batch=self.n_batch,
+                n_threads=self.n_threads,
+                n_threads_batch=self.n_threads_batch,
+                verbose=self.verbose,
             )
             
             load_time = time.time() - load_start
+
+            # Best-effort: if the build supports GPU offload and we requested GPU layers, assume GPU.
+            self.compute = "gpu" if (self.supports_gpu_offload and (self.n_gpu_layers != 0)) else "cpu"
             
-            print(f"✓ Model loaded in {load_time:.1f} seconds")
-            print(f"✓ VRAM usage: ~3 GB (lighter than transformers!)")
-            print(f"✓ GPU acceleration: Enabled (all layers)")
-            print(f"✓ Context window: 2048 tokens")
-            print()
+            if self.verbose:
+                print(f"[OK] Model loaded in {load_time:.1f} seconds")
+                if self.compute == "gpu":
+                    print("[OK] GPU acceleration: Enabled")
+                else:
+                    print("[OK] GPU acceleration: Not available (CPU mode)")
+                print(f"[OK] Context window: {self.n_ctx} tokens")
+                print()
             
         except Exception as e:
-            print(f"\n✗ Error loading model: {e}")
+            print(f"\n[X] Error loading model: {e}")
             print("\nNote: If GPU loading fails, the model will fall back to CPU.")
             print("This is normal if CUDA is not properly configured.")
             raise
+
+    def get_runtime_info(self) -> dict:
+        return {
+            "compute": getattr(self, "compute", "unknown"),
+            "n_gpu_layers": getattr(self, "n_gpu_layers", None),
+            "supports_gpu_offload": getattr(self, "supports_gpu_offload", None),
+            "n_threads": getattr(self, "n_threads", None),
+            "n_ctx": getattr(self, "n_ctx", None),
+            "n_batch": getattr(self, "n_batch", None),
+        }
     
-    def generate(self, system_prompt, user_message, max_tokens=512):
-        """Generate response"""
-        
-        # Llama 3.1 chat format
-        prompt = f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+    def generate(self, system_prompt, user_message, max_tokens=256):
+        """Generate response via chat completion.
 
-{system_prompt}<|eot_id|><|start_header_id|>user<|end_header_id|>
-
-{user_message}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
-
-"""
-        
+        Using `create_chat_completion` avoids duplicated BOS tokens and lets the
+        model apply the GGUF chat template correctly.
+        """
         inference_start = time.time()
-        
-        output = self.model(
-            prompt,
-            max_tokens=max_tokens,
-            temperature=0.7,
-            top_p=0.9,
+
+        output = self.model.create_chat_completion(
+            messages=[
+                {"role": "system", "content": str(system_prompt or "")},
+                {"role": "user", "content": str(user_message or "")},
+            ],
+            max_tokens=int(max_tokens or 256),
+            temperature=float(os.getenv("PM_LLM_TEMPERATURE", "0.3")),
+            top_p=float(os.getenv("PM_LLM_TOP_P", "0.9")),
             stop=["<|eot_id|>"],
-            echo=False
         )
-        
+
         inference_time = time.time() - inference_start
-        
-        response = output['choices'][0]['text'].strip()
-        
-        # Calculate tokens/sec
-        response_tokens = len(response.split())  # Rough estimate
-        tokens_per_sec = response_tokens / inference_time if inference_time > 0 else 0
-        
-        return response, inference_time, response_tokens, tokens_per_sec
+
+        # llama-cpp-python chat completion shape
+        response = ""
+        try:
+            response = (output.get("choices") or [{}])[0].get("message", {}).get("content", "")
+        except Exception:
+            response = ""
+        response = (response or "").strip()
+
+        # Best-effort token counts
+        completion_tokens = None
+        try:
+            completion_tokens = (output.get("usage") or {}).get("completion_tokens")
+        except Exception:
+            completion_tokens = None
+        if completion_tokens is None:
+            completion_tokens = len(response.split())  # fallback estimate
+
+        tokens_per_sec = (float(completion_tokens) / inference_time) if inference_time > 0 else 0.0
+        return response, inference_time, int(completion_tokens), float(tokens_per_sec)
 
 # Test
 if __name__ == "__main__":

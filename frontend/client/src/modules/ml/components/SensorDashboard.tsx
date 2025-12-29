@@ -427,7 +427,7 @@ const SensorDashboard: React.FC<SensorDashboardProps> = ({
 
         <Stack direction="row" spacing={2} alignItems="center">
           {/* Live Indicator */}
-          <Tooltip title={connected ? 'WebSocket connected' : 'Disconnected'}>
+          <Tooltip title={connected ? 'Backend connected' : 'Disconnected'}>
             <Chip
               icon={
                 <CircleIcon

@@ -105,6 +105,40 @@ Explain:
 Keep response under 150 words."""
 
 
+# Combined template for a single per-run explanation (classification + RUL + anomaly + forecast)
+COMBINED_RUN_PROMPT = """A predictive maintenance system ran multiple models for {machine_id}.
+
+CURRENT SENSOR READINGS:
+{sensor_readings}
+
+MODEL OUTPUTS:
+- Classification: failure_type={failure_type} | failure_probability={failure_probability} | confidence={classification_confidence}
+- RUL: rul_hours={rul_hours} | confidence={rul_confidence}
+- Anomaly: anomaly_score={anomaly_score} | method={detection_method}
+- Forecast: {forecast_summary}
+
+RETRIEVED CONTEXT:
+{rag_context}
+
+Write ONE short maintenance brief in plain text (no Markdown).
+Use exactly this structure and keep it under 160 words:
+
+Overall: <one sentence>
+Top causes:
+- <cause 1 tied to specific sensor(s)>
+- <cause 2 tied to specific sensor(s)>
+Immediate actions:
+- <action 1>
+- <action 2>
+- <action 3>
+Next 7 days:
+- <plan 1>
+- <plan 2>
+Safety: <one sentence>
+
+If a model output is missing/unavailable, say "unavailable" and proceed."""
+
+
 # Template usage example (for reference)
 """
 Example Usage in Production (Phase 3.5):
