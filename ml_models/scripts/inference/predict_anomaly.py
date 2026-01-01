@@ -343,6 +343,16 @@ class AnomalyPredictor:
                             anomaly_score = -detector.score_samples(X)[0]
                         else:
                             anomaly_score = 1.0 if prediction == -1 else 0.0
+
+                    # Some detectors return scores where "more normal" yields positive values.
+                    # After inversion, that can produce negative anomaly scores. For our purposes
+                    # (anomaly magnitude), clamp to >= 0 so normalization stays stable.
+                    try:
+                        anomaly_score = float(anomaly_score)
+                    except Exception:
+                        anomaly_score = 0.0
+                    if anomaly_score < 0.0:
+                        anomaly_score = 0.0
                     
                     detector_scores[detector_name] = float(anomaly_score)
                     detector_predictions[detector_name] = int(prediction)
@@ -367,6 +377,11 @@ class AnomalyPredictor:
                 ensemble_score = float(np.mean(normalized_scores))
             else:
                 ensemble_score = 0.0
+
+            # Final guardrail: keep score in [0, 1] for UI/LLM consistency.
+            if not np.isfinite(ensemble_score):
+                ensemble_score = 0.0
+            ensemble_score = float(max(0.0, min(1.0, ensemble_score)))
             
             # Determine anomaly severity
             if ensemble_score > 0.8:

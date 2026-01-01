@@ -19,12 +19,104 @@ from pathlib import Path
 import json
 import sys
 import time
+import math
 
 # Ensure project root is importable so `GAN.*` namespace imports work reliably
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from GAN.config.rul_profiles import RUL_PROFILES, get_machine_category, get_rul_profile
+
+
+def _profile_path_for_machine(machine_id: str) -> Path:
+    return PROJECT_ROOT / 'GAN' / 'data' / 'real_machines' / 'profiles' / f'{machine_id}.json'
+
+
+def _load_machine_profile(machine_id: str) -> dict | None:
+    try:
+        p = _profile_path_for_machine(machine_id)
+        if not p.exists():
+            return None
+        return json.loads(p.read_text(encoding='utf-8'))
+    except Exception:
+        return None
+
+
+def _is_missing_number(v) -> bool:
+    if v is None:
+        return True
+    if isinstance(v, str) and v.strip().lower() in ('', 'none', 'null', 'nan'):
+        return True
+    if isinstance(v, (int, float)):
+        try:
+            return math.isnan(float(v))
+        except Exception:
+            return False
+    return False
+
+
+def _profile_has_rul(profile: dict | None) -> bool:
+    if not isinstance(profile, dict):
+        return True
+    rul_min = profile.get('rul_min', None)
+    rul_max = profile.get('rul_max', None)
+    # If both are missing/NaN placeholders => explicitly no RUL.
+    if _is_missing_number(rul_min) and _is_missing_number(rul_max):
+        return False
+    return True
+
+
+def _sensors_from_profile(profile: dict | None) -> list[dict]:
+    if not isinstance(profile, dict):
+        return []
+
+    sensors_config: list[dict] = []
+
+    baseline = profile.get('baseline_normal_operation') or {}
+    if isinstance(baseline, dict):
+        # Common pattern: baseline_normal_operation.{temperature|thermal|vibration|...}.{sensor_name}.{min/max}
+        for group_name, group in baseline.items():
+            if not isinstance(group, dict):
+                continue
+            for sensor_name, spec in group.items():
+                if not isinstance(spec, dict):
+                    continue
+                mn = spec.get('min', None)
+                mx = spec.get('max', None)
+                typ = spec.get('typical', None)
+
+                # Establish a reasonable normal range
+                if isinstance(mn, (int, float)) and isinstance(mx, (int, float)) and mx > mn:
+                    normal_range = [float(mn), float(mx)]
+                elif isinstance(typ, (int, float)):
+                    normal_range = [float(typ) * 0.9, float(typ) * 1.1]
+                else:
+                    continue
+
+                sensors_config.append({
+                    'name': sensor_name,
+                    'type': str(group_name),
+                    'normal_range': normal_range,
+                })
+
+    # Also support explicit profile['sensors'] list if present.
+    explicit = profile.get('sensors')
+    if isinstance(explicit, list):
+        for s in explicit:
+            if not isinstance(s, dict):
+                continue
+            name = s.get('name')
+            if not isinstance(name, str) or not name.strip():
+                continue
+            if any(x.get('name') == name for x in sensors_config):
+                continue
+            sensors_config.append({
+                'name': name,
+                'type': s.get('type', 'generic'),
+                'normal_range': [0, 100],
+            })
+
+    return sensors_config
 
 
 def create_temporal_seed_data(machine_id, rul_profile, n_samples=50000):
@@ -49,6 +141,9 @@ def create_temporal_seed_data(machine_id, rul_profile, n_samples=50000):
     print(f"Creating temporal seed data: {machine_id}")
     print(f"{'=' * 70}")
     
+    profile = _load_machine_profile(machine_id)
+    include_rul = _profile_has_rul(profile)
+
     max_rul = rul_profile['max_rul']
     cycles = rul_profile['cycles_per_dataset']
     pattern = rul_profile['degradation_pattern']
@@ -57,6 +152,7 @@ def create_temporal_seed_data(machine_id, rul_profile, n_samples=50000):
     
     print(f"Configuration:")
     print(f"  Max RUL: {max_rul} hours")
+    print(f"  Include RUL column: {'YES' if include_rul else 'NO'}")
     print(f"  Cycles: {cycles}")
     print(f"  Pattern: {pattern}")
     print(f"  Total samples: {n_samples}")
@@ -81,7 +177,9 @@ def create_temporal_seed_data(machine_id, rul_profile, n_samples=50000):
             pattern=pattern,
             noise_std=noise_std,
             correlations=correlations,
-            cycle_number=cycle_idx
+            cycle_number=cycle_idx,
+            include_rul=include_rul,
+            profile=profile,
         )
         
         all_cycles.append(cycle_data)
@@ -97,15 +195,17 @@ def create_temporal_seed_data(machine_id, rul_profile, n_samples=50000):
         freq='1h'
     )
     
-    # Reorder columns: timestamp, rul, sensors
-    cols = ['timestamp', 'rul'] + [col for col in full_data.columns if col not in ['timestamp', 'rul']]
+    # Reorder columns: timestamp, (optional) rul, sensors
+    base_cols = ['timestamp'] + (['rul'] if include_rul and 'rul' in full_data.columns else [])
+    cols = base_cols + [col for col in full_data.columns if col not in base_cols]
     full_data = full_data[cols]
     
     print(f"\n{'=' * 70}")
     print(f"Seed data creation complete!")
     print(f"  Total samples: {len(full_data)}")
     print(f"  Features: {len(full_data.columns)}")
-    print(f"  RUL range: {full_data['rul'].max():.0f} -> {full_data['rul'].min():.0f}")
+    if include_rul and 'rul' in full_data.columns:
+        print(f"  RUL range: {full_data['rul'].max():.0f} -> {full_data['rul'].min():.0f}")
     print(f"  Time range: {full_data['timestamp'].min()} to {full_data['timestamp'].max()}")
     print(f"{'=' * 70}\n")
     
@@ -113,7 +213,9 @@ def create_temporal_seed_data(machine_id, rul_profile, n_samples=50000):
 
 
 def generate_single_degradation_cycle(machine_id, cycle_samples, max_rul, 
-                                      pattern, noise_std, correlations, cycle_number):
+                                      pattern, noise_std, correlations, cycle_number,
+                                      include_rul: bool = True,
+                                      profile: dict | None = None):
     """
     Generate ONE run-to-failure cycle with physics-based degradation
     
@@ -125,30 +227,25 @@ def generate_single_degradation_cycle(machine_id, cycle_samples, max_rul,
     """
     
     # ============================================
-    # STEP 1: Generate RUL sequence
+    # STEP 1: Generate degradation factor (+ optional RUL)
     # ============================================
-    if pattern == 'linear_slow':
-        rul_base = np.linspace(max_rul, 0, cycle_samples)
-    elif pattern == 'linear_medium':
-        rul_base = np.linspace(max_rul, 0, cycle_samples)
-    elif pattern == 'linear_fast':
-        rul_base = np.linspace(max_rul, 0, cycle_samples)
-    elif pattern == 'exponential':
-        # Accelerating degradation (e.g., tool wear)
-        t = np.linspace(0, 1, cycle_samples)
-        rul_base = max_rul * (1 - t**2)  # Quadratic decay
+    if include_rul:
+        if pattern == 'exponential':
+            t = np.linspace(0, 1, cycle_samples)
+            rul_base = max_rul * (1 - t**2)  # Quadratic decay
+        else:
+            rul_base = np.linspace(max_rul, 0, cycle_samples)
+
+        # Add realistic noise
+        rul_noise = np.random.normal(0, noise_std, cycle_samples)
+        rul = np.maximum(rul_base + rul_noise, 0)  # Ensure non-negative
+
+        # degradation: 0 (healthy) -> 1 (failure)
+        degradation = 1 - (rul / max_rul)
     else:
-        rul_base = np.linspace(max_rul, 0, cycle_samples)
-    
-    # Add realistic noise
-    rul_noise = np.random.normal(0, noise_std, cycle_samples)
-    rul = np.maximum(rul_base + rul_noise, 0)  # Ensure non-negative
-    
-    # ============================================
-    # STEP 2: Calculate degradation factor
-    # ============================================
-    # degradation: 0 (healthy) -> 1 (failure)
-    degradation = 1 - (rul / max_rul)
+        # No-RUL machines: still generate a smooth degradation factor so sensors drift realistically.
+        degradation = np.linspace(0.0, 1.0, cycle_samples)
+        degradation = np.clip(degradation + np.random.normal(0.0, 0.01, cycle_samples), 0.0, 1.0)
     
     # ============================================
     # STEP 3: Generate physics-based sensor values
@@ -206,6 +303,10 @@ def generate_single_degradation_cycle(machine_id, cycle_samples, max_rul,
                 'type': sensor_type,
                 'normal_range': normal_range
             })
+
+    # If no metadata, attempt to derive sensors from the machine profile.
+    if not sensors_config:
+        sensors_config = _sensors_from_profile(profile)
     
     # Fallback if no metadata found
     if not sensors_config:
@@ -290,10 +391,10 @@ def generate_single_degradation_cycle(machine_id, cycle_samples, max_rul,
     # ============================================
     # STEP 4: Create DataFrame
     # ============================================
-    cycle_df = pd.DataFrame({
-        'rul': rul,
-        **sensor_data
-    })
+    payload = {**sensor_data}
+    if include_rul:
+        payload = {'rul': rul, **payload}
+    cycle_df = pd.DataFrame(payload)
     
     return cycle_df
 

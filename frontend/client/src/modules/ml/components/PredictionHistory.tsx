@@ -45,6 +45,43 @@ import {
   Visibility as ViewIcon,
 } from '@mui/icons-material';
 
+const ACCESS_TOKEN_KEY = 'pm_access_token';
+const REFRESH_TOKEN_KEY = 'pm_refresh_token';
+
+function getAccessToken(): string | null {
+  try {
+    const token = window.localStorage.getItem(ACCESS_TOKEN_KEY);
+    return token && token.trim() ? token : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearTokens(): void {
+  try {
+    window.localStorage.removeItem(ACCESS_TOKEN_KEY);
+    window.localStorage.removeItem(REFRESH_TOKEN_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+async function fetchWithAuth(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  const token = getAccessToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const resp = await fetch(input, { ...init, headers });
+  if (resp.status === 401) {
+    clearTokens();
+    try {
+      window.location.reload();
+    } catch {
+      // ignore
+    }
+  }
+  return resp;
+}
+
 // ============================================================================
 // TYPESCRIPT INTERFACES
 // ============================================================================
@@ -53,6 +90,7 @@ export interface PredictionHistoryProps {
   machineId: string;
   predictions?: HistoricalPrediction[];
   limit?: number;
+  sessionId?: string;
   onRowClick?: (prediction: HistoricalPrediction) => void;
 }
 
@@ -72,6 +110,7 @@ export interface HistoricalPrediction {
   run_id?: string | null;
   has_run?: boolean;
   has_explanation?: boolean;
+  run_type?: 'prediction' | 'explanation' | null;  // "prediction" = ML only, "explanation" = full with LLM
   sensor_snapshot?: Record<string, number>;
 }
 
@@ -102,8 +141,9 @@ const formatTimestamp = (date: Date): string => {
   }).format(date);
 };
 
-const viewLatestDataset = (machineId: string) => {
-  const url = `${API_BASE}/api/ml/machines/${encodeURIComponent(machineId)}/audit/datasets/latest`;
+const viewLatestDataset = (machineId: string, sessionId?: string) => {
+  const qs = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : '';
+  const url = `${API_BASE}/api/ml/machines/${encodeURIComponent(machineId)}/audit/wide/latest${qs}`;
   window.open(url, '_blank', 'noopener,noreferrer');
 };
 
@@ -140,6 +180,7 @@ export default function PredictionHistory({
   machineId,
   predictions = [],
   limit = 100,
+  sessionId,
   onRowClick,
 }: PredictionHistoryProps) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -193,7 +234,7 @@ export default function PredictionHistory({
     }
 
     try {
-      const resp = await fetch(`${API_BASE}/api/ml/runs/${encodeURIComponent(runId)}`, {
+      const resp = await fetchWithAuth(`${API_BASE}/api/ml/runs/${encodeURIComponent(runId)}`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
         signal: AbortSignal.timeout(10_000),
@@ -246,17 +287,42 @@ export default function PredictionHistory({
     },
     {
       field: 'has_run',
-      headerName: 'Prediction/LLM',
+      headerName: 'Status',
       width: 150,
       renderCell: (params: GridRenderCellParams) => {
         const hasRun = Boolean(params.row.run_id);
         const hasExplanation = Boolean(params.row.has_explanation);
-        const label = !hasRun ? 'NO RUN' : (hasExplanation ? 'EXPLAINED' : 'NO EXPLANATION');
-        const palette = !hasRun
-          ? { bg: 'rgba(156,163,175,0.12)', fg: '#9ca3af', border: 'rgba(156,163,175,0.25)' }
-          : (hasExplanation
-            ? { bg: 'rgba(16,185,129,0.15)', fg: '#10b981', border: 'rgba(16,185,129,0.35)' }
-            : { bg: 'rgba(251,191,36,0.12)', fg: '#fbbf24', border: 'rgba(251,191,36,0.35)' });
+        const runType = params.row.run_type as string | undefined;
+        
+        // Debug log
+        console.log('[PredictionHistory] Row status:', { 
+          run_id: params.row.run_id, 
+          run_type: runType, 
+          hasRun, 
+          hasExplanation 
+        });
+        
+        // Determine label and palette based on run_type
+        let label: string;
+        let palette: { bg: string; fg: string; border: string };
+        
+        if (!hasRun) {
+          label = 'NO RUN';
+          palette = { bg: 'rgba(156,163,175,0.12)', fg: '#9ca3af', border: 'rgba(156,163,175,0.25)' };
+        } else if (runType === 'prediction') {
+          // ML-only auto prediction (blue)
+          label = 'PREDICTION';
+          palette = { bg: 'rgba(59,130,246,0.15)', fg: '#3b82f6', border: 'rgba(59,130,246,0.35)' };
+        } else if (hasExplanation) {
+          // Full with LLM explanation (green)
+          label = 'EXPLAINED';
+          palette = { bg: 'rgba(16,185,129,0.15)', fg: '#10b981', border: 'rgba(16,185,129,0.35)' };
+        } else {
+          // Run exists but no explanation yet (yellow)
+          label = 'PENDING';
+          palette = { bg: 'rgba(251,191,36,0.12)', fg: '#fbbf24', border: 'rgba(251,191,36,0.35)' };
+        }
+        
         return (
           <Chip
             size="small"
@@ -456,7 +522,7 @@ export default function PredictionHistory({
           {/* View dataset (server-collected CSV) */}
           <Button
             variant="outlined"
-            onClick={() => viewLatestDataset(machineId)}
+            onClick={() => viewLatestDataset(machineId, sessionId)}
             sx={{
               borderColor: '#667eea',
               color: '#667eea',

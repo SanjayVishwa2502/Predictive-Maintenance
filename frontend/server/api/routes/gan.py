@@ -26,6 +26,7 @@ from api.models.gan import (
     TemplateInfo,
     ProfileUploadResponse,
     ProfileValidationResponse,
+    MetadataGenerationResponse,
     ValidationIssue,
     InlineProfileValidationResponse,
     SeedGenerationResponse,
@@ -51,6 +52,155 @@ from celery_app import celery_app
 from config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _profile_has_rul(profile: Dict[str, Any]) -> bool:
+    """Return True if profile declares a usable numeric RUL range."""
+    try:
+        rul_min = profile.get("rul_min")
+        rul_max = profile.get("rul_max")
+
+        def _to_float(v: Any) -> Optional[float]:
+            if v is None:
+                return None
+            if isinstance(v, (int, float)):
+                return float(v)
+            if isinstance(v, str):
+                s = v.strip().lower()
+                if not s or s in {"nan", "null", "none"}:
+                    return None
+                try:
+                    return float(s)
+                except Exception:
+                    return None
+            return None
+
+        mn = _to_float(rul_min)
+        mx = _to_float(rul_max)
+        if mn is None or mx is None:
+            return False
+        return mx >= mn
+    except Exception:
+        return False
+
+
+def _extract_sensor_features_from_profile(profile: Dict[str, Any]) -> List[str]:
+    """Extract flat sensor feature names from baseline_normal_operation."""
+    baseline = profile.get("baseline_normal_operation")
+    if not isinstance(baseline, dict):
+        return []
+
+    features: List[str] = []
+    for group_value in baseline.values():
+        if isinstance(group_value, dict):
+            for sensor_name in group_value.keys():
+                if isinstance(sensor_name, str) and sensor_name.strip():
+                    features.append(sensor_name.strip())
+
+    # Dedupe while preserving order
+    seen: set[str] = set()
+    ordered: List[str] = []
+    for f in features:
+        if f not in seen:
+            seen.add(f)
+            ordered.append(f)
+    return ordered
+
+
+def _coerce_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            return float(value)
+        except Exception:
+            return None
+    if isinstance(value, str):
+        s = value.strip().lower()
+        if not s or s in {"nan", "null", "none"}:
+            return None
+        try:
+            return float(s)
+        except Exception:
+            return None
+    return None
+
+
+def _extract_baseline_ranges(profile: Dict[str, Any]) -> Dict[str, Dict[str, Optional[float]]]:
+    """Flatten baseline_normal_operation into sensor -> {min, typical, max, alarm, trip}."""
+    baseline = profile.get("baseline_normal_operation")
+    if not isinstance(baseline, dict):
+        return {}
+
+    ranges: Dict[str, Dict[str, Optional[float]]] = {}
+    for group_value in baseline.values():
+        if not isinstance(group_value, dict):
+            continue
+        for sensor_name, payload in group_value.items():
+            if not isinstance(sensor_name, str) or not sensor_name.strip():
+                continue
+            if not isinstance(payload, dict):
+                continue
+
+            ranges[sensor_name.strip()] = {
+                "min": _coerce_float(payload.get("min")),
+                "typical": _coerce_float(payload.get("typical")),
+                "max": _coerce_float(payload.get("max")),
+                "alarm": _coerce_float(payload.get("alarm")),
+                "trip": _coerce_float(payload.get("trip")),
+            }
+    return ranges
+
+
+def _load_machine_profile_payload(machine_id: str) -> Dict[str, Any]:
+    """Best-effort load for a machine's authored profile JSON, falling back to derived metadata."""
+    mid = (machine_id or "").strip().lower()
+    if not mid:
+        return {}
+
+    profile_json_file = _machine_profile_file(mid)
+    if profile_json_file is not None and profile_json_file.exists():
+        try:
+            return json.loads(profile_json_file.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    metadata_file = _get_gan_metadata_path() / f"{mid}_metadata.json"
+    if metadata_file.exists():
+        try:
+            return json.loads(metadata_file.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    return {}
+
+
+def _build_metadata_json_from_profile(profile: Dict[str, Any]) -> Dict[str, Any]:
+    """Create metadata JSON matching existing GAN/metadata/*_metadata.json format."""
+    columns: Dict[str, Any] = {
+        # Temporal pipeline always includes a timestamp.
+        "timestamp": {"sdtype": "datetime"},
+    }
+
+    for feature in _extract_sensor_features_from_profile(profile):
+        columns[feature] = {"sdtype": "numerical", "computer_representation": "Float"}
+
+    metadata: Dict[str, Any] = {
+        "columns": columns,
+        "METADATA_SPEC_VERSION": "SINGLE_TABLE_V1",
+    }
+
+    # Optional: only attach rul_parameters when profile actually supports RUL.
+    if _profile_has_rul(profile):
+        metadata["rul_parameters"] = {
+            "max_operational_hours": None,
+            "degradation_profile": "unknown",
+            "sensor_influence_percentage": None,
+            "noise_percentage": None,
+            "critical_sensors": [],
+        }
+
+    return metadata
 
 
 def _get_project_root() -> Path:
@@ -930,6 +1080,86 @@ async def edit_profile(
         )
 
 
+@router.post(
+    "/profiles/{profile_id}/generate-metadata",
+    response_model=MetadataGenerationResponse,
+    summary="Generate Machine Metadata from Staged Profile",
+    description="""
+    Generate the derived metadata JSON file used by the GAN workflow.
+
+    Writes: GAN/metadata/<machine_id>_metadata.json
+
+    Intended to be called immediately after profile upload/edit + validation.
+    """,
+    responses={
+        200: {"description": "Metadata generated"},
+        404: {"description": "Profile not found"},
+        429: {"description": "Rate limit exceeded"},
+    },
+    dependencies=[Depends(rate_limiter)],
+)
+async def generate_metadata_from_staged_profile(profile_id: str) -> MetadataGenerationResponse:
+    try:
+        metadata_path = _get_gan_metadata_path()
+        metadata_path.mkdir(parents=True, exist_ok=True)
+
+        profile_file = metadata_path / f"{profile_id}_profile_temp.json"
+        if not profile_file.exists():
+            # Fallback: scan temp profiles and match embedded profile_id
+            for candidate in metadata_path.glob("*_profile_temp.json"):
+                try:
+                    with open(candidate, "r", encoding="utf-8") as f:
+                        candidate_data = json.load(f)
+                    if str(candidate_data.get("profile_id", "")) == str(profile_id):
+                        profile_file = candidate
+                        break
+                except Exception:
+                    continue
+
+        if not profile_file.exists():
+            raise HTTPException(status_code=404, detail=f"Profile {profile_id} not found")
+
+        with open(profile_file, "r", encoding="utf-8") as f:
+            profile_data = json.load(f)
+
+        machine_id = str(profile_data.get("machine_id") or "").strip().lower()
+        if not machine_id:
+            raise HTTPException(status_code=400, detail="Invalid staged profile: missing machine_id")
+
+        # Avoid clobbering metadata due to a staged duplicate.
+        if _machine_exists(machine_id):
+            permanent_profile = _machine_profile_file(machine_id)
+            if permanent_profile is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Cannot generate metadata: machine '{machine_id}' already exists. "
+                        "Fix machine_id in the editor before generating metadata."
+                    ),
+                )
+
+        metadata_json = _build_metadata_json_from_profile(profile_data)
+        out_file = metadata_path / f"{machine_id}_metadata.json"
+        with open(out_file, "w", encoding="utf-8") as f:
+            json.dump(metadata_json, f, indent=2)
+
+        logger.info(f"[OK] Generated metadata for staged profile {profile_id}: {out_file}")
+
+        return MetadataGenerationResponse(
+            success=True,
+            profile_id=profile_id,
+            machine_id=machine_id,
+            metadata_file=str(Path("GAN") / "metadata" / out_file.name),
+            message="Metadata generated successfully",
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to generate metadata for staged profile {profile_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate metadata: {str(e)}")
+
+
 # ============================================================================
 # MACHINE MANAGEMENT ENDPOINTS (5)
 # ============================================================================
@@ -1456,6 +1686,62 @@ async def get_machine_details(machine_id: str) -> MachineDetails:
             status_code=500,
             detail=f"Failed to get machine details: {str(e)}"
         )
+
+
+@router.get(
+    "/machines/{machine_id}/baseline",
+    response_model=Dict[str, Any],
+    summary="Get Machine Baseline Ranges",
+    description="""
+    Return flattened baseline normal-operation ranges from the machine profile.
+
+    This is intended for UI monitoring thresholds and chart scaling.
+
+    **Returns:**
+    - machine_id
+    - baseline_ranges: mapping of sensor feature -> {min, typical, max, alarm, trip}
+
+    **Caching:** 30 seconds TTL
+    **Rate Limit:** 100 requests/minute per IP
+    """,
+    responses={
+        200: {"description": "Baseline ranges"},
+        404: {"description": "Machine not found"},
+        429: {"description": "Rate limit exceeded"},
+    },
+    dependencies=[Depends(rate_limiter)],
+)
+async def get_machine_baseline(machine_id: str) -> Dict[str, Any]:
+    try:
+        mid = (machine_id or "").strip().lower()
+        if not mid:
+            raise HTTPException(status_code=400, detail="Invalid machine_id")
+
+        if not _machine_exists(mid):
+            raise HTTPException(status_code=404, detail=f"Machine '{mid}' not found")
+
+        cache_key = f"gan:machines:{mid}:baseline"
+        cached = await get_cached_response(cache_key)
+        if cached:
+            return cached
+
+        payload = _load_machine_profile_payload(mid)
+        baseline_ranges = _extract_baseline_ranges(payload)
+
+        response: Dict[str, Any] = {
+            "machine_id": mid,
+            "baseline_ranges": baseline_ranges,
+            "has_baseline": bool(baseline_ranges),
+        }
+
+        await set_cached_response(cache_key, response)
+        return response
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get baseline for {machine_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get baseline: {str(e)}")
 
 
 @router.get(

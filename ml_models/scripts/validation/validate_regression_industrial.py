@@ -74,7 +74,16 @@ class RegressionIndustrialValidator:
         
         # Verify RUL column exists
         if 'rul' not in train_df.columns:
-            raise ValueError(f"RUL column missing in {self.machine_id} data")
+            message = (
+                f"⚠️  RUL column missing in {self.machine_id} synthetic data. "
+                "Skipping regression validation."
+            )
+            self.results['status'] = 'skipped'
+            self.results['skipped'] = True
+            self.results['skip_reason'] = message
+            if self.verbose:
+                print(message)
+            return None, None, None
         
         if self.verbose:
             print(f"✅ Data loaded:")
@@ -564,6 +573,10 @@ class RegressionIndustrialValidator:
         # Load model and data
         self.load_model()
         train_df, val_df, test_df = self.load_data()
+
+        if train_df is None or val_df is None or test_df is None:
+            # RUL not available; skip gracefully.
+            return self.results
         
         # Test 1: Basic performance on all splits
         if self.verbose:
@@ -704,6 +717,14 @@ def validate_all_regression_models(machines_file='../../config/priority_10_machi
             
             results = validator.run_full_validation()
             validator.save_report()
+
+            if results.get('skipped'):
+                summary['results'].append({
+                    'machine_id': machine_id,
+                    'status': 'skipped',
+                    'reason': results.get('skip_reason', 'RUL not available')
+                })
+                continue
             
             # Add to summary
             summary['results'].append({

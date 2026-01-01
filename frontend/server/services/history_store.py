@@ -74,6 +74,7 @@ class RunRecord:
     sensor_data: Dict[str, Any]
     predictions: Dict[str, Any]
     llm: Dict[str, Any]
+    run_type: str = "explanation"  # "prediction" or "explanation"
 
 
 def _compact_predictions_for_storage(predictions: Dict[str, Any]) -> Dict[str, Any]:
@@ -169,9 +170,10 @@ async def list_snapshots(machine_id: str, limit: int = 500) -> List[Dict[str, An
     for idx, run_id in enumerate(run_ids):
         snapshots[idx]["run_id"] = run_id
         snapshots[idx]["has_run"] = bool(run_id)
+        snapshots[idx]["run_type"] = None  # will be populated below if run exists
 
     # Best-effort: mark whether an LLM explanation exists for each snapshot's run.
-    # We keep this lightweight (single pipeline) to support UI filtering.
+    # Also capture run_type for UI display.
     details_pipe = r.pipeline()
     details_map: List[int] = []
     for idx, run_id in enumerate(run_ids):
@@ -194,6 +196,10 @@ async def list_snapshots(machine_id: str, limit: int = 500) -> List[Dict[str, An
             obj = json.loads(raw)
         except Exception:
             continue
+        
+        # Extract run_type
+        snapshots[snap_idx]["run_type"] = obj.get("run_type", "explanation")
+        
         llm = obj.get("llm") or {}
         has_summary = False
         if isinstance(llm, dict):
@@ -218,9 +224,15 @@ async def get_run_id_for_stamp(machine_id: str, data_stamp: str) -> Optional[str
     return val or None
 
 
-async def create_run(machine_id: str, snapshot: SnapshotItem, predictions: Dict[str, Any]) -> RunRecord:
+async def create_run(machine_id: str, snapshot: SnapshotItem, predictions: Dict[str, Any], run_type: str = "explanation") -> RunRecord:
+    """
+    Create a run record.
+    
+    run_type: "prediction" for ML-only (auto), "explanation" for full with LLM
+    """
     run_id = str(uuid.uuid4())
     created_at = _utc_now_stamp()
+    run_type = run_type if run_type in ("prediction", "explanation") else "explanation"
 
     compact_predictions = _compact_predictions_for_storage(predictions or {})
     record: Dict[str, Any] = {
@@ -231,6 +243,7 @@ async def create_run(machine_id: str, snapshot: SnapshotItem, predictions: Dict[
         "sensor_data": snapshot.sensor_data or {},
         "predictions": compact_predictions,
         "llm": {},
+        "run_type": run_type,
     }
 
     r = await _get_redis()
@@ -260,6 +273,7 @@ async def create_run(machine_id: str, snapshot: SnapshotItem, predictions: Dict[
         payload={
             "sensor_data": snapshot.sensor_data or {},
             "predictions": payload_predictions,
+            "run_type": run_type,
         },
     )
 
@@ -271,6 +285,7 @@ async def create_run(machine_id: str, snapshot: SnapshotItem, predictions: Dict[
         sensor_data=snapshot.sensor_data or {},
         predictions=compact_predictions,
         llm={},
+        run_type=run_type,
     )
 
 
@@ -301,6 +316,7 @@ async def list_runs(machine_id: str, limit: int = 200) -> List[Dict[str, Any]]:
                 "machine_id": obj.get("machine_id"),
                 "data_stamp": obj.get("data_stamp"),
                 "created_at": obj.get("created_at"),
+                "run_type": obj.get("run_type", "explanation"),
                 "has_details": True,
             }
         )
@@ -345,3 +361,11 @@ async def update_run_llm(run_id: str, use_case: str, summary: str, compute: str 
         task_id=(task_id or "").strip(),
         payload={"use_case": uc, "compute": compute, "summary": summary},
     )
+
+
+async def create_run_prediction_only(machine_id: str, snapshot: SnapshotItem, predictions: Dict[str, Any]) -> RunRecord:
+    """
+    Convenience wrapper for creating a prediction-only run (no LLM).
+    Used by auto_prediction_service for automatic ML runs every Nth data point.
+    """
+    return await create_run(machine_id, snapshot, predictions, run_type="prediction")

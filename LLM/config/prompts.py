@@ -111,8 +111,15 @@ COMBINED_RUN_PROMPT = """A predictive maintenance system ran multiple models for
 CURRENT SENSOR READINGS:
 {sensor_readings}
 
+BASELINE NORMAL RANGES (if available):
+{baseline_ranges}
+
+Interpretation:
+- A sensor reading within its baseline min..max is normal.
+- Only treat as overheating/overtemp if above baseline alarm or trip (or clearly above max).
+
 MODEL OUTPUTS:
-- Classification: failure_type={failure_type} | failure_probability={failure_probability} | confidence={classification_confidence}
+- Classification: label={failure_type} | label_probability={classification_probability} | failure_risk={failure_risk} | confidence={classification_confidence}
 - RUL: rul_hours={rul_hours} | confidence={rul_confidence}
 - Anomaly: anomaly_score={anomaly_score} | method={detection_method}
 - Forecast: {forecast_summary}
@@ -135,6 +142,17 @@ Next 7 days:
 - <plan 1>
 - <plan 2>
 Safety: <one sentence>
+
+Rules:
+- Do NOT invent faults. Only call something a "cause" if it is supported by model outputs (high failure_risk, anomaly_score) OR current readings are outside the BASELINE NORMAL RANGES.
+- Define "low" as: failure_risk < 0.15 AND anomaly_score < 0.30.
+- For "normal" classification with low failure_risk and low anomaly_score, your Overall sentence MUST say the machine is operating normally with low risk.
+- For "normal" classification with low failure_risk and low anomaly_score, your Top causes MUST be:
+    - None detected (readings within baseline)
+    - Continue monitoring
+- Only describe overheating/overtemp when a temperature exceeds baseline max/alarm/trip.
+- If you see a single temperature reading without variance/trend, do NOT call it "unstable".
+- Avoid degree symbols; write temperatures as e.g. "210 C" (not "210°C").
 
 If a model output is missing/unavailable, say "unavailable" and proceed."""
 

@@ -299,6 +299,27 @@ class ProfileValidationResponse(BaseModel):
         }
 
 
+class MetadataGenerationResponse(BaseModel):
+    """Metadata generation response (writes GAN/metadata/<machine_id>_metadata.json)."""
+
+    success: bool
+    profile_id: str
+    machine_id: str
+    metadata_file: str
+    message: str
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "success": True,
+                "profile_id": "a1b2c3d4-e5f6-7890",
+                "machine_id": "printer_creality_ender3_001",
+                "metadata_file": "GAN/metadata/printer_creality_ender3_001_metadata.json",
+                "message": "Metadata generated successfully"
+            }
+        }
+
+
 # ============================================================================
 # WORKFLOW OPERATIONS - REQUEST MODELS
 # ============================================================================

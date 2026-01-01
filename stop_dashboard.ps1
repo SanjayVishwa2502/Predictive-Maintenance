@@ -61,6 +61,24 @@ foreach ($portInfo in $ports) {
 
 Write-ColorOutput ""
 
+# Stop printer datalogger processes (no port binding)
+try {
+    $loggerProcs = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like "*3Dprinterdata*datalogger.py*" }
+    if ($loggerProcs) {
+        foreach ($p in ($loggerProcs | Select-Object -Unique ProcessId)) {
+            Write-ColorOutput "  [LOGGER] Stopping datalogger (PID: $($p.ProcessId))..." "White"
+            Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Milliseconds 300
+            Write-ColorOutput "     [OK] datalogger stopped" "Green"
+        }
+    } else {
+        Write-ColorOutput "  [LOGGER] datalogger not running" "Gray"
+    }
+} catch {
+    Write-ColorOutput "  [LOGGER] [WARN] Error stopping datalogger" "Yellow"
+}
+
 # ============================================================================
 # FALLBACK: PROCESS NAME CLEANUP
 # ============================================================================

@@ -2,10 +2,11 @@
 Test script for Phase 3.7.1.3: Authentication endpoints
 Tests user registration, login, token refresh, and protected routes.
 """
+import os
 import requests
 import json
 
-BASE_URL = "http://localhost:8000"
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000")
 
 def print_section(title):
     print("\n" + "=" * 70)
@@ -63,7 +64,7 @@ def test_authentication():
     response = requests.post(f"{BASE_URL}/api/auth/register", json={
         "username": "admin",
         "email": "another@predictive.ai",
-        "password": "Pass123",
+        "password": "Pass12345",
         "role": "viewer"
     })
     print_response(response)

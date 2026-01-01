@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict, List, Any, Tuple, Optional, Set
 from datetime import datetime
 import re
+import math
 
 
 def _to_snake_token(value: str) -> str:
@@ -1059,17 +1060,88 @@ class MachineProfileValidator:
                     )
                 )
         
-        # Validate RUL range if present
-        if 'rul_min' in profile_data and 'rul_max' in profile_data:
-            rul_min = profile_data.get('rul_min', 0)
-            rul_max = profile_data.get('rul_max', 0)
-            
-            if rul_max <= rul_min:
-                issues.append(ValidationIssue(
-                    severity="error",
-                    field="rul_range",
-                    message=f"Invalid RUL range: rul_max ({rul_max}) must be greater than rul_min ({rul_min})"
-                ))
+        # Validate RUL range if present.
+        # NOTE: Some machines (e.g., simple thermal logs like 3D printers) may not have an RUL label.
+        # For those, we allow `rul_min`/`rul_max` to be omitted or set to a placeholder.
+        def _parse_optional_rul(value: Any) -> Tuple[Optional[float], bool, bool]:
+            """Return (parsed_value, is_missing, is_invalid).
+
+            Missing means: None, "", "null", "none", "nan" (string), or NaN float.
+            Invalid means: provided but not numeric.
+            """
+            if value is None:
+                return None, True, False
+            if isinstance(value, str):
+                s = value.strip().lower()
+                if s in ("", "null", "none", "nan"):
+                    return None, True, False
+            try:
+                f = float(value)
+                if math.isnan(f):
+                    return None, True, False
+                return f, False, False
+            except Exception:
+                return None, False, True
+
+        has_rul_min = "rul_min" in profile_data
+        has_rul_max = "rul_max" in profile_data
+        if has_rul_min or has_rul_max:
+            raw_min = profile_data.get("rul_min")
+            raw_max = profile_data.get("rul_max")
+
+            rul_min, min_missing, min_invalid = _parse_optional_rul(raw_min)
+            rul_max, max_missing, max_invalid = _parse_optional_rul(raw_max)
+
+            if min_invalid:
+                issues.append(
+                    ValidationIssue(
+                        severity="error",
+                        field="rul_min",
+                        message="rul_min must be numeric, null, or 'NaN' (string) to indicate no RUL.",
+                    )
+                )
+            if max_invalid:
+                issues.append(
+                    ValidationIssue(
+                        severity="error",
+                        field="rul_max",
+                        message="rul_max must be numeric, null, or 'NaN' (string) to indicate no RUL.",
+                    )
+                )
+
+            # If both are missing (or placeholders), treat as "no RUL" and warn.
+            if min_missing and max_missing:
+                issues.append(
+                    ValidationIssue(
+                        severity="warning" if strict else "info",
+                        field="rul_range",
+                        message=(
+                            "No RUL configured for this machine (rul_min/rul_max are missing or set to a placeholder). "
+                            "RUL regression training/validation will be skipped."
+                        ),
+                    )
+                )
+            # If one side is present and the other is missing => inconsistent.
+            elif min_missing != max_missing:
+                issues.append(
+                    ValidationIssue(
+                        severity="error",
+                        field="rul_range",
+                        message=(
+                            "Incomplete RUL range: provide both rul_min and rul_max, or set both to null/'NaN' to indicate no RUL."
+                        ),
+                    )
+                )
+            # Both numeric: validate ordering.
+            elif rul_min is not None and rul_max is not None:
+                if rul_max <= rul_min:
+                    issues.append(
+                        ValidationIssue(
+                            severity="error",
+                            field="rul_range",
+                            message=f"Invalid RUL range: rul_max ({rul_max}) must be greater than rul_min ({rul_min})",
+                        )
+                    )
         
         # Check degradation states
         if 'degradation_states' in profile_data:

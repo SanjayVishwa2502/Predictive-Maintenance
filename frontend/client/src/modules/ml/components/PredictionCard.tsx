@@ -271,16 +271,17 @@ export default function PredictionCard({
                 >
                   Copy
                 </Button>
-                <Button
-                  size="small"
-                  variant="contained"
-                  startIcon={<PlayArrowIcon />}
-                  onClick={onRunPrediction}
-                  disabled={isBusy || Boolean(loading)}
-                  sx={{ textTransform: 'none' }}
-                >
-                  Prediction
-                </Button>
+                {!isBusy && !Boolean(loading) && (
+                  <Button
+                    size="small"
+                    variant="contained"
+                    startIcon={<PlayArrowIcon />}
+                    onClick={onRunPrediction}
+                    sx={{ textTransform: 'none' }}
+                  >
+                    Prediction
+                  </Button>
+                )}
               </Box>
             </Box>
           }

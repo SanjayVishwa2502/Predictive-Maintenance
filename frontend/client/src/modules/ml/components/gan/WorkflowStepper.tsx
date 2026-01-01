@@ -263,11 +263,24 @@ export default function WorkflowStepper({ machineId, onBackToList, initialStep }
 
         const epoch = status.progress?.epoch;
         const loss = status.progress?.loss;
-        if (typeof epoch === 'number' && typeof loss === 'number') {
+        if (typeof epoch === 'number' && typeof loss === 'number' && Number.isFinite(epoch) && Number.isFinite(loss)) {
+          const epochInt = Math.floor(epoch);
           const lastEpoch = lastLossEpochRef.current;
-          if (lastEpoch === null || epoch > lastEpoch) {
-            lastLossEpochRef.current = epoch;
-            setLossPoints((prev) => [...prev, { epoch, loss }]);
+          if (lastEpoch === null || epochInt > lastEpoch) {
+            lastLossEpochRef.current = epochInt;
+            setLossPoints((prev) => {
+              const next = [...prev, { epoch: epochInt, loss }];
+              return next.length > 5000 ? next.slice(next.length - 5000) : next;
+            });
+          } else if (epochInt === lastEpoch) {
+            setLossPoints((prev) => {
+              if (!prev.length) return [{ epoch: epochInt, loss }];
+              const last = prev[prev.length - 1];
+              if (last.epoch !== epochInt) return prev;
+              const next = prev.slice(0, -1);
+              next.push({ epoch: epochInt, loss });
+              return next;
+            });
           }
         }
 

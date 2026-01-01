@@ -371,12 +371,14 @@ class TimeSeriesPredictor:
             
             temp_values = []
             vib_values = []
+            per_temp_means: Dict[str, float] = {}
             
             for col in temp_cols:
                 if col in forecasts and forecasts[col]['yhat']:
                     window_vals = forecasts[col]['yhat'][start:end]
                     if window_vals and all(v is not None for v in window_vals):
                         temp_values.extend(window_vals)
+                        per_temp_means[col] = float(np.mean(window_vals))
             
             for col in vib_cols:
                 if col in forecasts and forecasts[col]['yhat']:
@@ -386,12 +388,22 @@ class TimeSeriesPredictor:
             
             # Build summary for this window
             if temp_values and vib_values:
-                summary_parts.append(
-                    f"{label}: Temperature {np.mean(temp_values):.1f}°C, "
-                    f"Vibration {np.mean(vib_values):.1f} mm/s"
-                )
+                if len(per_temp_means) >= 2 and len(per_temp_means) <= 4:
+                    temps = ", ".join([f"{k} {v:.1f} C" for k, v in per_temp_means.items()])
+                    summary_parts.append(
+                        f"{label}: Temperature ({temps}), Vibration {np.mean(vib_values):.1f} mm/s"
+                    )
+                else:
+                    summary_parts.append(
+                        f"{label}: Temperature {np.mean(temp_values):.1f} C, "
+                        f"Vibration {np.mean(vib_values):.1f} mm/s"
+                    )
             elif temp_values:
-                summary_parts.append(f"{label}: Temperature {np.mean(temp_values):.1f}°C")
+                if len(per_temp_means) >= 2 and len(per_temp_means) <= 4:
+                    temps = ", ".join([f"{k} {v:.1f} C" for k, v in per_temp_means.items()])
+                    summary_parts.append(f"{label}: Temperature ({temps})")
+                else:
+                    summary_parts.append(f"{label}: Temperature {np.mean(temp_values):.1f} C")
             elif vib_values:
                 summary_parts.append(f"{label}: Vibration {np.mean(vib_values):.1f} mm/s")
         

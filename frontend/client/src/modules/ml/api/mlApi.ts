@@ -9,6 +9,24 @@ import type { AxiosResponse } from 'axios';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
+const ACCESS_TOKEN_KEY = 'pm_access_token';
+
+function getAccessToken(): string | null {
+  try {
+    const token = window.localStorage.getItem(ACCESS_TOKEN_KEY);
+    return token && token.trim() ? token : null;
+  } catch {
+    return null;
+  }
+}
+
+function authHeaders(extra?: Record<string, string>): Record<string, string> {
+  const token = getAccessToken();
+  const headers: Record<string, string> = { ...(extra || {}) };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -98,6 +116,7 @@ export interface ActiveSimulationsResponse {
 export async function getMachineStatus(machineId: string): Promise<MachineStatusResponse> {
   const response: AxiosResponse<MachineStatusResponse> = await axios.get(
     `${API_BASE}/api/ml/machines/${encodeURIComponent(machineId)}/status`
+    , { headers: authHeaders() }
   );
   return response.data;
 }
@@ -105,7 +124,7 @@ export async function getMachineStatus(machineId: string): Promise<MachineStatus
 export async function getMachineSnapshots(machineId: string, limit = 200): Promise<MachineSnapshotsResponse> {
   const response: AxiosResponse<MachineSnapshotsResponse> = await axios.get(
     `${API_BASE}/api/ml/machines/${encodeURIComponent(machineId)}/snapshots`,
-    { params: { limit } }
+    { params: { limit }, headers: authHeaders() }
   );
   return response.data;
 }
@@ -113,7 +132,7 @@ export async function getMachineSnapshots(machineId: string, limit = 200): Promi
 export async function getMachineRuns(machineId: string, limit = 200): Promise<MachineRunsResponse> {
   const response: AxiosResponse<MachineRunsResponse> = await axios.get(
     `${API_BASE}/api/ml/machines/${encodeURIComponent(machineId)}/runs`,
-    { params: { limit } }
+    { params: { limit }, headers: authHeaders() }
   );
   return response.data;
 }
@@ -121,6 +140,7 @@ export async function getMachineRuns(machineId: string, limit = 200): Promise<Ma
 export async function getRunDetails(runId: string): Promise<RunDetailsResponse> {
   const response: AxiosResponse<RunDetailsResponse> = await axios.get(
     `${API_BASE}/api/ml/runs/${encodeURIComponent(runId)}`
+    , { headers: authHeaders() }
   );
   return response.data;
 }
@@ -129,7 +149,7 @@ export async function startAutoRuns(machineId: string, intervalSeconds = 150): P
   const response: AxiosResponse<AutoRunStatusResponse> = await axios.post(
     `${API_BASE}/api/ml/machines/${encodeURIComponent(machineId)}/auto/start`,
     null,
-    { params: { interval_seconds: intervalSeconds } }
+    { params: { interval_seconds: intervalSeconds }, headers: authHeaders() }
   );
   return response.data;
 }
@@ -137,6 +157,7 @@ export async function startAutoRuns(machineId: string, intervalSeconds = 150): P
 export async function stopAutoRuns(machineId: string): Promise<AutoRunStatusResponse> {
   const response: AxiosResponse<AutoRunStatusResponse> = await axios.post(
     `${API_BASE}/api/ml/machines/${encodeURIComponent(machineId)}/auto/stop`
+    , null, { headers: authHeaders() }
   );
   return response.data;
 }
@@ -144,6 +165,7 @@ export async function stopAutoRuns(machineId: string): Promise<AutoRunStatusResp
 export async function getAutoRunsStatus(machineId: string): Promise<AutoRunStatusResponse> {
   const response: AxiosResponse<AutoRunStatusResponse> = await axios.get(
     `${API_BASE}/api/ml/machines/${encodeURIComponent(machineId)}/auto/status`
+    , { headers: authHeaders() }
   );
   return response.data;
 }
@@ -151,6 +173,7 @@ export async function getAutoRunsStatus(machineId: string): Promise<AutoRunStatu
 export async function autoRunOnce(machineId: string): Promise<{ run_id: string; machine_id: string; data_stamp: string; created_at: string }> {
   const response: AxiosResponse<{ run_id: string; machine_id: string; data_stamp: string; created_at: string }> = await axios.post(
     `${API_BASE}/api/ml/machines/${encodeURIComponent(machineId)}/auto/run_once`
+    , null, { headers: authHeaders() }
   );
   return response.data;
 }
@@ -161,6 +184,7 @@ export async function autoRunOnce(machineId: string): Promise<{ run_id: string; 
 export async function startSimulation(machineId: string): Promise<SimulationControlResponse> {
   const response: AxiosResponse<SimulationControlResponse> = await axios.post(
     `${API_BASE}/api/ml/simulation/start/${encodeURIComponent(machineId)}`
+    , null, { headers: authHeaders() }
   );
   return response.data;
 }
@@ -171,6 +195,7 @@ export async function startSimulation(machineId: string): Promise<SimulationCont
 export async function stopSimulation(machineId: string): Promise<SimulationControlResponse> {
   const response: AxiosResponse<SimulationControlResponse> = await axios.post(
     `${API_BASE}/api/ml/simulation/stop/${encodeURIComponent(machineId)}`
+    , null, { headers: authHeaders() }
   );
   return response.data;
 }
@@ -181,6 +206,7 @@ export async function stopSimulation(machineId: string): Promise<SimulationContr
 export async function getSimulationStatus(machineId: string): Promise<SimulationStatusResponse> {
   const response: AxiosResponse<SimulationStatusResponse> = await axios.get(
     `${API_BASE}/api/ml/simulation/status/${encodeURIComponent(machineId)}`
+    , { headers: authHeaders() }
   );
   return response.data;
 }
@@ -191,6 +217,7 @@ export async function getSimulationStatus(machineId: string): Promise<Simulation
 export async function getActiveSimulations(): Promise<ActiveSimulationsResponse> {
   const response: AxiosResponse<ActiveSimulationsResponse> = await axios.get(
     `${API_BASE}/api/ml/simulation/active`
+    , { headers: authHeaders() }
   );
   return response.data;
 }
@@ -201,6 +228,7 @@ export async function getActiveSimulations(): Promise<ActiveSimulationsResponse>
 export async function stopAllSimulations(): Promise<SimulationControlResponse> {
   const response: AxiosResponse<SimulationControlResponse> = await axios.post(
     `${API_BASE}/api/ml/simulation/stop-all`
+    , null, { headers: authHeaders() }
   );
   return response.data;
 }

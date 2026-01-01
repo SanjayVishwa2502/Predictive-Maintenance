@@ -42,6 +42,42 @@ import {
 } from '@mui/icons-material';
 import ReactMarkdown from 'react-markdown';
 import { forwardRef } from 'react';
+const ACCESS_TOKEN_KEY = 'pm_access_token';
+const REFRESH_TOKEN_KEY = 'pm_refresh_token';
+
+function getAccessToken(): string | null {
+  try {
+    const token = window.localStorage.getItem(ACCESS_TOKEN_KEY);
+    return token && token.trim() ? token : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearTokens(): void {
+  try {
+    window.localStorage.removeItem(ACCESS_TOKEN_KEY);
+    window.localStorage.removeItem(REFRESH_TOKEN_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+async function fetchWithAuth(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  const token = getAccessToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const resp = await fetch(input, { ...init, headers });
+  if (resp.status === 401) {
+    clearTokens();
+    try {
+      window.location.reload();
+    } catch {
+      // ignore
+    }
+  }
+  return resp;
+}
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
@@ -97,7 +133,7 @@ const fetchExplanation = async (
   apiEndpoint: string
 ): Promise<ExplanationResponse> => {
   const explainUrl = apiEndpoint.startsWith('http') ? apiEndpoint : `${API_BASE_URL}${apiEndpoint}`;
-  const response = await fetch(explainUrl, {
+  const response = await fetchWithAuth(explainUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -131,7 +167,7 @@ const fetchExplanation = async (
       // Wait 2 seconds between polls (keeps load low)
       await new Promise((r) => setTimeout(r, 2000));
 
-      const statusResp = await fetch(statusUrl, {
+      const statusResp = await fetchWithAuth(statusUrl, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
       });

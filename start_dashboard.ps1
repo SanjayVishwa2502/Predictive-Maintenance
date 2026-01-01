@@ -123,6 +123,22 @@ if ($killed -eq 0) {
     Start-Sleep -Seconds 2
 }
 
+# Stop any existing datalogger instances (no port binding; match command line)
+try {
+    $loggerProcs = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like "*3Dprinterdata*datalogger.py*" }
+    foreach ($p in ($loggerProcs | Select-Object -Unique ProcessId)) {
+        try {
+            Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+            Write-ColorOutput "  [-] Killed datalogger (PID: $($p.ProcessId))" "Gray"
+        } catch {
+            # ignore
+        }
+    }
+} catch {
+    # ignore
+}
+
 Write-ColorOutput ""
 
 # ============================================================================
@@ -144,6 +160,19 @@ if ($UvicornReload) {
 $backendCmd = "cd '$ProjectRoot\frontend\server'; & '$ProjectRoot\venv\Scripts\Activate.ps1'; Write-Host '=== BACKEND SERVER (Port 8000) ===' -ForegroundColor Green; uvicorn $uvicornArgs 2>&1 | Tee-Object -FilePath '$backendLog'"
 Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoExit", "-Command", $backendCmd
 Write-ColorOutput "     Log: $backendLog" "Gray"
+
+# 1b. Printer Logger (MQTT -> clean CSV)
+# This is NOT a separate backend; it's a long-running data capture process.
+Write-ColorOutput "[LOGGER] Starting Printer MQTT Logger..." "Green"
+$loggerLog = "$LogDir\logger_$Timestamp.log"
+$loggerCmd = "cd '$ProjectRoot\3Dprinterdata'; & '$ProjectRoot\venv\Scripts\Activate.ps1'; " +
+    "if (-not `$env:PM_MACHINE_ID) { `$env:PM_MACHINE_ID = 'printer_creality_ender3_001' }; " +
+    "if (-not `$env:PM_LOG_MODE) { `$env:PM_LOG_MODE = 'clean' }; " +
+    "if (-not `$env:PM_LOG_DIR) { `$env:PM_LOG_DIR = '$ProjectRoot\3Dprinterdata' }; " +
+    "Write-Host '=== PRINTER LOGGER (MQTT -> CSV) ===' -ForegroundColor Green; " +
+    "& '$ProjectRoot\venv\Scripts\python.exe' '$ProjectRoot\3Dprinterdata\datalogger.py' 2>&1 | Tee-Object -FilePath '$loggerLog'"
+Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoExit", "-Command", $loggerCmd
+Write-ColorOutput "     Log: $loggerLog" "Gray"
 
 # 2. Celery Worker - System PowerShell Window
 # Default worker handles GAN/ML and lightweight tasks.

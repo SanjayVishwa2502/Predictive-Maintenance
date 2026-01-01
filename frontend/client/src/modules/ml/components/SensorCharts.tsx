@@ -63,6 +63,16 @@ export interface SensorChartsProps {
   availableSensors: string[];
   selectedSensors?: string[];
   onSensorToggle?: (sensor: string) => void;
+  baselineRanges?: Record<
+    string,
+    {
+      min?: number | null;
+      typical?: number | null;
+      max?: number | null;
+      alarm?: number | null;
+      trip?: number | null;
+    }
+  >;
   autoScroll?: boolean;
   maxDataPoints?: number;
 }
@@ -149,6 +159,40 @@ const getDefaultThreshold = (sensorName: string): SensorThreshold | null => {
   return null;
 };
 
+const getBaselineThreshold = (
+  sensorName: string,
+  baselineRanges?: SensorChartsProps['baselineRanges']
+): SensorThreshold | null => {
+  if (!baselineRanges) return null;
+
+  const direct = baselineRanges[sensorName];
+  const lower = baselineRanges[sensorName.toLowerCase()];
+  const underscored = baselineRanges[sensorName.replace(/\s+/g, '_')];
+  const range = direct || lower || underscored;
+  if (!range) return null;
+
+  const toNum = (v: unknown): number | undefined => {
+    if (typeof v === 'number' && !isNaN(v)) return v;
+    return undefined;
+  };
+
+  const alarm = toNum(range.alarm) ?? toNum(range.max) ?? toNum(range.trip);
+  const trip = toNum(range.trip) ?? alarm;
+  if (alarm === undefined || trip === undefined) return null;
+
+  return {
+    warning: Math.min(alarm, trip),
+    critical: Math.max(alarm, trip),
+  };
+};
+
+const stripMachinePrefix = (machineId: string, sensorName: string): string => {
+  const mid = (machineId || '').trim().toLowerCase();
+  if (!mid) return sensorName;
+  const prefix = `${mid}_`;
+  return sensorName.toLowerCase().startsWith(prefix) ? sensorName.slice(prefix.length) : sensorName;
+};
+
 const exportToCSV = (data: SensorReading[], sensors: string[], machineId: string) => {
   const headers = ['Timestamp', ...sensors.map(s => formatSensorName(s))];
   const rows = data.map(reading => [
@@ -180,18 +224,35 @@ export default function SensorCharts({
   availableSensors,
   selectedSensors: externalSelectedSensors,
   onSensorToggle,
+  baselineRanges,
   autoScroll = true,
   maxDataPoints = 120,
 }: SensorChartsProps) {
-  const [internalSelectedSensors, setInternalSelectedSensors] = useState<string[]>(
-    availableSensors.slice(0, 3)
-  );
+  const [internalSelectedSensors, setInternalSelectedSensors] = useState<string[]>([]);
   const [isPaused, setIsPaused] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
   const chartContainerRef = useRef<HTMLDivElement>(null);
 
-  // Use external or internal sensor selection
-  const selectedSensors = externalSelectedSensors || internalSelectedSensors;
+  const isExternallyControlled =
+    Array.isArray(externalSelectedSensors) && typeof onSensorToggle === 'function';
+
+  // Use external selection only when a change handler exists; otherwise fall back to internal.
+  const selectedSensors = isExternallyControlled ? externalSelectedSensors : internalSelectedSensors;
+
+  // Keep a sensible internal default selection as sensors become available/change.
+  useEffect(() => {
+    if (!availableSensors || availableSensors.length === 0) {
+      setInternalSelectedSensors((prev) => (prev.length === 0 ? prev : []));
+      return;
+    }
+
+    setInternalSelectedSensors((prev) => {
+      const filtered = prev.filter((s) => availableSensors.includes(s));
+      const next = (filtered.length > 0 ? filtered : availableSensors.slice(0, 3)).slice(0, 5);
+      if (next.length === prev.length && next.every((v, i) => v === prev[i])) return prev;
+      return next;
+    });
+  }, [availableSensors]);
 
   // Handle sensor selection change
   const handleSensorChange = (event: SelectChangeEvent<string[]>) => {
@@ -199,14 +260,18 @@ export default function SensorCharts({
     
     // Limit to 5 sensors max
     if (value.length > 5) return;
-    
-    if (onSensorToggle) {
-      // External control
-      value.forEach(sensor => onSensorToggle(sensor));
-    } else {
-      // Internal control
-      setInternalSelectedSensors(value);
+
+    if (isExternallyControlled) {
+      // External control: compute delta and toggle only changed sensors.
+      const current = externalSelectedSensors;
+      const removed = current.filter((s) => !value.includes(s));
+      const added = value.filter((s) => !current.includes(s));
+      [...removed, ...added].forEach((sensor) => onSensorToggle(sensor));
+      return;
     }
+
+    // Internal control
+    setInternalSelectedSensors(value);
   };
 
   // Prepare chart data (limit to maxDataPoints)
@@ -221,15 +286,34 @@ export default function SensorCharts({
 
   // Get min/max values for Y-axis domain
   const getYAxisDomain = useMemo(() => {
-    if (chartData.length === 0 || selectedSensors.length === 0) {
+    const toNum = (v: unknown): number | undefined => {
+      if (typeof v === 'number' && !isNaN(v)) return v;
+      return undefined;
+    };
+
+    if (selectedSensors.length === 0) {
       return [0, 100];
+    }
+
+    // Seed with baseline-derived domain when there is no chart data yet.
+    if (chartData.length === 0) {
+      const first = selectedSensors[0];
+      const baseKey = stripMachinePrefix(machineId, first);
+      const range =
+        baselineRanges?.[baseKey] ||
+        baselineRanges?.[baseKey.toLowerCase()] ||
+        baselineRanges?.[baseKey.replace(/\s+/g, '_')];
+      const minCandidate = toNum(range?.min) ?? 0;
+      const maxCandidate = toNum(range?.trip) ?? toNum(range?.alarm) ?? toNum(range?.max) ?? 100;
+      const padding = Math.max((maxCandidate - minCandidate) * 0.1, 1);
+      return [Math.floor(minCandidate - padding), Math.ceil(maxCandidate + padding)];
     }
 
     let min = Infinity;
     let max = -Infinity;
 
-    chartData.forEach(point => {
-      selectedSensors.forEach(sensor => {
+    chartData.forEach((point) => {
+      selectedSensors.forEach((sensor) => {
         const value = (point as Record<string, unknown>)[sensor] as number;
         if (typeof value === 'number' && !isNaN(value)) {
           min = Math.min(min, value);
@@ -238,10 +322,29 @@ export default function SensorCharts({
       });
     });
 
-    // Add 10% padding
-    const padding = (max - min) * 0.1;
+    // Include baseline ranges to keep thresholds in view and avoid weird defaults.
+    selectedSensors.forEach((sensor) => {
+      const baseKey = stripMachinePrefix(machineId, sensor);
+      const range =
+        baselineRanges?.[baseKey] ||
+        baselineRanges?.[baseKey.toLowerCase()] ||
+        baselineRanges?.[baseKey.replace(/\s+/g, '_')];
+      const candidates = [range?.min, range?.typical, range?.max, range?.alarm, range?.trip]
+        .map(toNum)
+        .filter((v): v is number => v !== undefined);
+      candidates.forEach((v) => {
+        min = Math.min(min, v);
+        max = Math.max(max, v);
+      });
+    });
+
+    if (!isFinite(min) || !isFinite(max)) {
+      return [0, 100];
+    }
+
+    const padding = Math.max((max - min) * 0.1, 1);
     return [Math.floor(min - padding), Math.ceil(max + padding)];
-  }, [chartData, selectedSensors]);
+  }, [chartData, selectedSensors, baselineRanges, machineId]);
 
   // Handle zoom
   const handleZoomIn = () => {
@@ -497,7 +600,8 @@ export default function SensorCharts({
               {/* Threshold lines for first selected sensor */}
               {selectedSensors.length > 0 && (() => {
                 const firstSensor = selectedSensors[0];
-                const threshold = getDefaultThreshold(firstSensor);
+                const baseKey = stripMachinePrefix(machineId, firstSensor);
+                const threshold = getBaselineThreshold(baseKey, baselineRanges) || getDefaultThreshold(baseKey) || getDefaultThreshold(firstSensor);
                 return threshold ? (
                   <>
                     <ReferenceLine

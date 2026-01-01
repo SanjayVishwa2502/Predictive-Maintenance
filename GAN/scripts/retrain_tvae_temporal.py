@@ -66,8 +66,12 @@ def create_temporal_metadata(seed_data, machine_id):
     
     print(f"   Metadata created: {len(metadata.columns)} columns")
     print(f"   - timestamp: datetime")
-    print(f"   - rul + sensors: {len(metadata.columns) - 1} numerical features")
-    print(f"   RUL range: [{seed_data['rul'].min():.1f}, {seed_data['rul'].max():.1f}]")
+    numeric_cols = [c for c in seed_data.columns if c != 'timestamp']
+    print(f"   - numerical features: {len(numeric_cols)}")
+    if 'rul' in seed_data.columns:
+        print(f"   RUL range: [{seed_data['rul'].min():.1f}, {seed_data['rul'].max():.1f}]")
+    else:
+        print(f"   RUL: not present (no-RUL machine)")
     
     return metadata
 
@@ -123,13 +127,9 @@ def retrain_machine_tvae_temporal(machine_id, config, test_mode=False):
     print(f"   Features: {list(seed_data.columns)}")
     print(f"   RUL column present: {'rul' in seed_data.columns}")
     
-    # Validate RUL column exists
+    # No-RUL machines are supported: continue without RUL.
     if 'rul' not in seed_data.columns:
-        raise ValueError(
-            f"RUL column not found in temporal seed data for {machine_id}\n"
-            f"Expected columns: timestamp, rul, sensor_1, sensor_2, ...\n"
-            f"Found columns: {list(seed_data.columns)}"
-        )
+        print(f"   NOTE: No RUL column found. Training will proceed without RUL feature.")
     
     # Step 2: Create metadata with RUL as numerical feature
     print(f"\n[2/7] Creating metadata with RUL as numerical feature")
@@ -141,7 +141,7 @@ def retrain_machine_tvae_temporal(machine_id, config, test_mode=False):
     # Override epochs if test mode
     epochs = 10 if test_mode else config['epochs']
     print(f"   Architecture: TVAE (Tabular Variational AutoEncoder)")
-    print(f"   Training Mode: Temporal (with RUL correlation)")
+    print(f"   Training Mode: Temporal ({'with' if 'rul' in seed_data.columns else 'without'} RUL feature)")
     print(f"   Epochs: {epochs}")
     print(f"   Batch Size: {config['batch_size']}")
     print(f"   GPU Enabled: {config['cuda']}")

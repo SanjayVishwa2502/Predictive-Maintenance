@@ -103,6 +103,28 @@ export interface ProfileUploadResponse {
   validation_required?: boolean;
 }
 
+export interface MetadataGenerationResponse {
+  success: boolean;
+  profile_id: string;
+  machine_id: string;
+  metadata_file: string;
+  message: string;
+}
+
+export interface BaselineRange {
+  min?: number | null;
+  typical?: number | null;
+  max?: number | null;
+  alarm?: number | null;
+  trip?: number | null;
+}
+
+export interface MachineBaselineResponse {
+  machine_id: string;
+  has_baseline: boolean;
+  baseline_ranges: Record<string, BaselineRange>;
+}
+
 export interface SeedGenerationRequest {
   samples: number;
 }

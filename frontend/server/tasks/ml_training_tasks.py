@@ -128,6 +128,31 @@ def _validate_has_synthetic_data(machine_id: str) -> Path:
     return synthetic_dir
 
 
+def _synthetic_has_column(machine_id: str, column: str) -> bool:
+    """Best-effort check for a column in synthetic train.parquet.
+
+    We prefer reading Parquet schema (fast) and fall back to reading the file
+    via pandas when necessary.
+    """
+    train_path = PROJECT_ROOT / "GAN" / "data" / "synthetic" / machine_id / "train.parquet"
+    if not train_path.exists():
+        return False
+
+    try:
+        import pyarrow.parquet as pq  # type: ignore
+
+        schema = pq.read_schema(train_path)
+        return column in schema.names
+    except Exception:
+        try:
+            import pandas as pd  # type: ignore
+
+            df = pd.read_parquet(train_path)
+            return column in df.columns
+        except Exception:
+            return False
+
+
 def _model_dir(model_type: str, machine_id: str) -> Path:
     return PROJECT_ROOT / "ml_models" / "models" / model_type / machine_id
 
@@ -500,6 +525,31 @@ def _train_regression_impl(task: MLProgressTask, machine_id: str, time_limit: in
             started_at=started_at,
         )
         _validate_has_synthetic_data(machine_id)
+
+        if not _synthetic_has_column(machine_id, "rul"):
+            message = (
+                "⚠️ RUL column not found in synthetic data; skipping regression (RUL) training. "
+                "Proceed with classification/anomaly/timeseries instead."
+            )
+            logger.warning(f"[task_id={task_id} machine_id={machine_id}] {message}")
+            task.update_progress(
+                machine_id=machine_id,
+                current=100,
+                total=100,
+                status="SUCCESS",
+                message=message,
+                stage="skipped",
+                model_type=model_type,
+                started_at=started_at,
+                logs=message,
+            )
+            return {
+                "status": "skipped",
+                "machine_id": machine_id,
+                "model_type": model_type,
+                "report": {"skipped": True, "reason": message},
+                "logs": message,
+            }
 
         script = PROJECT_ROOT / "ml_models" / "scripts" / "training" / "train_regression_fast.py"
         if not script.exists():
@@ -896,6 +946,43 @@ def train_batch(
             started_at=started_at,
         )
         _validate_has_synthetic_data(machine_id)
+
+        if "regression" in requested and not _synthetic_has_column(machine_id, "rul"):
+            message = "⚠️ RUL column not found in synthetic data; skipping regression (RUL) in batch training."
+            logger.warning(f"[task_id={task_id} machine_id={machine_id}] {message}")
+            self.update_progress(
+                machine_id=machine_id,
+                current=8,
+                total=100,
+                status="RUNNING",
+                message=message,
+                stage="warning",
+                model_type="batch",
+                started_at=started_at,
+            )
+            requested = [m for m in requested if m != "regression"]
+
+        if not requested:
+            message = "⚠️ No trainable model types remain after applying RUL checks."
+            logger.warning(f"[task_id={task_id} machine_id={machine_id}] {message}")
+            self.update_progress(
+                machine_id=machine_id,
+                current=100,
+                total=100,
+                status="SUCCESS",
+                message=message,
+                stage="skipped",
+                model_type="batch",
+                started_at=started_at,
+            )
+            return {
+                "machine_id": machine_id,
+                "models_trained": 0,
+                "complete_system": False,
+                "results": {},
+                "skipped": True,
+                "reason": message,
+            }
 
         per_model_span = 100.0 / float(len(requested))
 

@@ -60,6 +60,13 @@ import {
   Toolbar,
   IconButton,
   CssBaseline,
+  Avatar,
+  Tooltip,
+  Menu,
+  MenuItem,
+  Divider,
+  ListItemIcon,
+  ListItemText,
 } from '@mui/material';
 import {
   Wifi as WifiIcon,
@@ -69,6 +76,7 @@ import {
   Sync as SyncIcon,
   Menu as MenuIcon,
   History as HistoryIcon,
+  Logout as LogoutIcon,
 } from '@mui/icons-material';
 import MachineSelector from '../modules/ml/components/MachineSelector';
 import SensorDashboard from '../modules/ml/components/SensorDashboard';
@@ -87,11 +95,16 @@ import ManageModelsView from '../modules/ml/components/models/ManageModelsView';
 import TaskStatusPoller from '../modules/ml/components/TaskStatusPoller';
 import { DashboardProvider, useDashboard } from '../modules/ml/context/DashboardContext';
 import { ganApi } from '../modules/ml/api/ganApi';
+import type { MachineBaselineResponse } from '../modules/ml/types/gan.types';
 import type { SensorReading } from '../modules/ml/components/SensorCharts';
 import type { HistoricalPrediction } from '../modules/ml/components/PredictionHistory';
 import type { PredictionResult as PredictionCardResult } from '../modules/ml/components/PredictionCard';
+import { RoleBadge, clearTokens, getCachedUserInfo, ROLE_CONFIG } from '../App';
+import type { UserInfo, UserRole } from '../App';
 
 type SnapshotHistoryRow = HistoricalPrediction;
+
+type BaselineRanges = NonNullable<MachineBaselineResponse['baseline_ranges']>;
 
 function getClientId(): string {
   const key = 'pm_client_id';
@@ -105,6 +118,55 @@ function getClientId(): string {
     return generated;
   } catch {
     return `pm_${Math.random().toString(16).slice(2)}_${Date.now()}`;
+  }
+}
+
+const ACCESS_TOKEN_KEY = 'pm_access_token';
+
+function getAccessToken(): string | null {
+  try {
+    const token = window.localStorage.getItem(ACCESS_TOKEN_KEY);
+    return token && token.trim() ? token : null;
+  } catch {
+    return null;
+  }
+}
+
+function authHeaders(extra?: Record<string, string>): HeadersInit {
+  const token = getAccessToken();
+  const headers: Record<string, string> = { ...(extra || {}) };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+
+async function fetchWithAuth(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  const token = getAccessToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const resp = await fetch(input, { ...init, headers });
+  if (resp.status === 401) {
+    clearTokens();
+    try {
+      window.location.reload();
+    } catch {
+      // ignore
+    }
+  }
+  return resp;
+}
+
+function getSessionId(): string {
+  const key = 'pm_session_id';
+  try {
+    const existing = window.sessionStorage.getItem(key);
+    if (existing && existing.trim()) return existing;
+    const generated = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `sess_${Math.random().toString(16).slice(2)}_${Date.now()}`;
+    window.sessionStorage.setItem(key, generated);
+    return generated;
+  } catch {
+    return `sess_${Math.random().toString(16).slice(2)}_${Date.now()}`;
   }
 }
 
@@ -141,10 +203,28 @@ function MLDashboardPageInner() {
     setConnectionStatus,
   } = useDashboard();
 
+  // User profile state
+  const [currentUser, setCurrentUser] = useState<UserInfo | null>(null);
+  const [userMenuAnchor, setUserMenuAnchor] = useState<null | HTMLElement>(null);
+  const userMenuOpen = Boolean(userMenuAnchor);
+
+  // Load user on mount
+  useEffect(() => {
+    const user = getCachedUserInfo();
+    setCurrentUser(user);
+  }, []);
+
+  const handleLogout = () => {
+    setUserMenuAnchor(null);
+    clearTokens();
+    window.location.reload();
+  };
+
   // State management
   const [machines, setMachines] = useState<Machine[]>([]);
   const [sensorData, setSensorData] = useState<Record<string, number> | null>(null);
   const [sensorHistory, setSensorHistory] = useState<SensorReading[]>([]);
+  const [baselineRanges, setBaselineRanges] = useState<BaselineRanges | null>(null);
   const [prediction, setPrediction] = useState<PredictionCardResult | null>(null);
   const [predictionHistory, setPredictionHistory] = useState<SnapshotHistoryRow[]>([]);
   const [selectedPredictionRunId, setSelectedPredictionRunId] = useState<string | null>(null);
@@ -159,6 +239,32 @@ function MLDashboardPageInner() {
   const [textOutput, setTextOutput] = useState<string>('');
   const [textOutputLoading, setTextOutputLoading] = useState(false);
   const [textOutputError, setTextOutputError] = useState<string | null>(null);
+
+  // Fetch profile baseline ranges for monitoring thresholds (best-effort; never blocks UI)
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!selectedMachineId) {
+      setBaselineRanges(null);
+      return;
+    }
+
+    (async () => {
+      try {
+        const resp = await ganApi.getMachineBaseline(selectedMachineId);
+        if (cancelled) return;
+        const ranges = resp?.baseline_ranges;
+        setBaselineRanges(ranges && typeof ranges === 'object' ? (ranges as BaselineRanges) : null);
+      } catch {
+        if (cancelled) return;
+        setBaselineRanges(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedMachineId]);
   const [machineSwitchLockRunId, setMachineSwitchLockRunId] = useState<string | null>(null);
   const machineSwitchLockRunIdRef = useRef<string | null>(null);
   const llmWsRef = useRef<WebSocket | null>(null);
@@ -286,6 +392,12 @@ function MLDashboardPageInner() {
       ? String(llm.combined.summary)
       : 'LLM: pending or not available';
 
+    const combinedTextClean = combinedText
+      .replaceAll('Â°C', ' C')
+      .replaceAll('°C', ' C')
+      .replaceAll('Â°F', ' F')
+      .replaceAll('°F', ' F');
+
     const fmtPct = (v: any) => {
       const n = Number(v);
       if (!Number.isFinite(n)) return 'n/a';
@@ -305,14 +417,24 @@ function MLDashboardPageInner() {
       if (cls?.error) {
         lines.push(`Classification: error: ${String(cls.error)}`);
       } else if (cls) {
+        const failureType = String(cls.failure_type ?? 'unknown');
+        const labelProb = cls.confidence;
+        const failureRisk = cls.failure_probability;
         lines.push(
-          `Classification: ${String(cls.failure_type ?? 'unknown')} | p=${fmtPct(cls.failure_probability)} | conf=${fmtNum(cls.confidence, 3)}`,
+          `Classification: ${failureType} | p=${fmtPct(labelProb)} | risk=${fmtPct(failureRisk)} | conf=${fmtNum(cls.confidence, 3)}`,
         );
       }
 
       const rul = predictions?.rul;
-      if (rul?.error) {
-        lines.push(`RUL: error: ${String(rul.error)}`);
+      if (rul?.skipped) {
+        lines.push('RUL: n/a (no RUL model for this machine)');
+      } else if (rul?.error) {
+        const msg = String(rul.error);
+        if (msg.toLowerCase().includes('rul model not found')) {
+          lines.push('RUL: n/a (no RUL model for this machine)');
+        } else {
+          lines.push(`RUL: error: ${msg}`);
+        }
       } else if (rul) {
         lines.push(
           `RUL: ${fmtNum(rul.rul_hours, 2)} hours (${fmtNum(rul.rul_days, 2)} days) | urgency=${String(rul.urgency ?? 'n/a')} | conf=${fmtNum(rul.confidence, 3)}`,
@@ -346,7 +468,7 @@ function MLDashboardPageInner() {
       computeLine,
       '',
       '[LLM]',
-      combinedText,
+      combinedTextClean,
       '',
       '[Predictions]',
       ...predictionSummaryLines(),
@@ -355,10 +477,10 @@ function MLDashboardPageInner() {
 
   const loadSnapshots = useCallback(async (machineId: string) => {
     try {
-      const resp = await fetch(`${API_BASE_URL}/api/ml/machines/${encodeURIComponent(machineId)}/snapshots?limit=100`, {
+      const resp = await fetchWithAuth(`${API_BASE_URL}/api/ml/machines/${encodeURIComponent(machineId)}/snapshots?limit=500`, {
         method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(10_000),
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        signal: AbortSignal.timeout(30_000),
       });
       if (!resp.ok) return;
       const json = await resp.json();
@@ -374,6 +496,7 @@ function MLDashboardPageInner() {
             run_id: s?.run_id ?? null,
             has_run: Boolean(s?.run_id),
             has_explanation: Boolean(s?.has_explanation),
+            run_type: s?.run_type ?? null,  // "prediction" or "explanation"
             sensor_snapshot: (s?.sensor_data as Record<string, number>) || {},
           } as SnapshotHistoryRow;
         })
@@ -398,9 +521,9 @@ function MLDashboardPageInner() {
     setTextOutputLoading(true);
     setTextOutputError(null);
     try {
-      const resp = await fetch(`${API_BASE_URL}/api/ml/runs/${encodeURIComponent(runId)}`, {
+      const resp = await fetchWithAuth(`${API_BASE_URL}/api/ml/runs/${encodeURIComponent(runId)}`, {
         method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         // Under heavy local inference load (model warm-up / Prophet), run reads can exceed 10s.
         signal: AbortSignal.timeout(30_000),
       });
@@ -447,7 +570,7 @@ function MLDashboardPageInner() {
             if (dataStamp) {
               setPredictionHistory((prev) => prev.map((r) => {
                 if (r.data_stamp !== dataStamp) return r;
-                return { ...r, run_id: runId, has_run: true, has_explanation: true };
+                return { ...r, run_id: runId, has_run: true, has_explanation: true, run_type: 'explanation' as const };
               }));
             }
 
@@ -502,21 +625,34 @@ function MLDashboardPageInner() {
     isFetchingStatusRef.current = true;
     
     try {
-      // Real API call to backend
-      const response = await fetch(API_ENDPOINTS.machineStatus(machineId), {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        // Keep this generous to avoid flapping during local CPU-heavy inference.
-        signal: AbortSignal.timeout(15_000),
-      });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      const sessionId = getSessionId();
+      const clientId = getClientId();
+      let data: any;
+      try {
+        // Prefer passing session/client id (query params) to ensure per-session dataset capture.
+        const url = `${API_ENDPOINTS.machineStatus(machineId)}?session_id=${encodeURIComponent(sessionId)}&client_id=${encodeURIComponent(clientId)}`;
+        const response = await fetchWithAuth(url, {
+          method: 'GET',
+          headers: authHeaders({ 'Content-Type': 'application/json' }),
+          // Keep this generous to avoid flapping during local CPU-heavy inference.
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        data = await response.json();
+      } catch {
+        // Fall back to the original endpoint if the server doesn't accept query params.
+        const response = await fetchWithAuth(API_ENDPOINTS.machineStatus(machineId), {
+          method: 'GET',
+          headers: authHeaders({ 'Content-Type': 'application/json' }),
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        data = await response.json();
       }
-      
-      const data = await response.json();
       const newData = data.latest_sensors;
       
       // Optimistic UI update
@@ -540,12 +676,16 @@ function MLDashboardPageInner() {
       // Persisted 5-second snapshot rows for the bottom history.
       const stamp = String(data.data_stamp || data.last_update || '').trim();
       if (stamp) {
+        // Check if auto-prediction ran for this data point
+        const autoPred = data.auto_prediction as { run_id?: string; run_type?: string } | undefined;
         const row: SnapshotHistoryRow = {
           id: stamp,
           timestamp: new Date(stamp),
           data_stamp: stamp,
-          run_id: data.run_id ?? null,
-          has_run: Boolean(data.run_id),
+          run_id: autoPred?.run_id ?? data.run_id ?? null,
+          has_run: Boolean(autoPred?.run_id || data.run_id),
+          has_explanation: false,  // Auto predictions don't have LLM explanations
+          run_type: autoPred?.run_type as 'prediction' | 'explanation' | undefined ?? null,
           sensor_snapshot: newData,
         };
         setPredictionHistory((prev) => {
@@ -592,13 +732,20 @@ function MLDashboardPageInner() {
   // Day 19.2: Fetch available machines from backend
   const fetchMachines = async () => {
     try {
-      const response = await fetch(API_ENDPOINTS.machines, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        signal: AbortSignal.timeout(5000),
-      });
+      const doFetch = async (timeoutMs: number) => {
+        return fetchWithAuth(API_ENDPOINTS.machines, {
+          method: 'GET',
+          headers: authHeaders({ 'Content-Type': 'application/json' }),
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+      };
+
+      // The ML backend can take a bit longer on cold start (model discovery + metadata load).
+      // Retry once with a longer timeout before falling back to mock data.
+      let response = await doFetch(15000);
+      if (!response.ok) {
+        response = await doFetch(15000);
+      }
       
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -640,11 +787,12 @@ function MLDashboardPageInner() {
 
     try {
       const clientId = getClientId();
-      const response = await fetch(
-        `${API_BASE_URL}/api/ml/machines/${encodeURIComponent(selectedMachineId)}/auto/run_once?client_id=${encodeURIComponent(clientId)}`,
+      const sessionId = getSessionId();
+      const response = await fetchWithAuth(
+        `${API_BASE_URL}/api/ml/machines/${encodeURIComponent(selectedMachineId)}/auto/run_once?client_id=${encodeURIComponent(clientId)}&session_id=${encodeURIComponent(sessionId)}`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: authHeaders({ 'Content-Type': 'application/json' }),
           // Back-end run_once performs synchronous inference (Prophet can take >60s).
           // Keep this long enough to avoid client-side abort while the server is still working.
           signal: AbortSignal.timeout(180_000),
@@ -707,6 +855,32 @@ function MLDashboardPageInner() {
     if (!sensorData) return [];
     return Object.keys(sensorData);
   }, [sensorData]);
+
+  // Sensor chart selection (max 5)
+  const [selectedSensors, setSelectedSensors] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!availableSensors || availableSensors.length === 0) {
+      setSelectedSensors((prev) => (prev.length === 0 ? prev : []));
+      return;
+    }
+
+    setSelectedSensors((prev) => {
+      const filtered = prev.filter((s) => availableSensors.includes(s));
+      const next = (filtered.length > 0 ? filtered : availableSensors.slice(0, 3)).slice(0, 5);
+      if (next.length === prev.length && next.every((v, i) => v === prev[i])) return prev;
+      return next;
+    });
+  }, [selectedMachineId, availableSensors]);
+
+  const handleSensorToggle = useCallback((sensor: string) => {
+    setSelectedSensors((prev) => {
+      const has = prev.includes(sensor);
+      if (has) return prev.filter((s) => s !== sensor);
+      if (prev.length >= 5) return prev;
+      return [...prev, sensor];
+    });
+  }, []);
 
   // Phase 3.7.6.1: View title helper
   const getViewTitle = (view: typeof selectedView) => {
@@ -830,6 +1004,70 @@ function MLDashboardPageInner() {
                   Last sync: {lastSyncTime.toLocaleTimeString()}
                 </Typography>
               )}
+
+              {/* User Profile Menu */}
+              {currentUser && (
+                <>
+                  <Divider orientation="vertical" flexItem sx={{ mx: 1, borderColor: 'rgba(255,255,255,0.2)' }} />
+                  <Tooltip title={`Signed in as ${currentUser.username}`}>
+                    <IconButton
+                      onClick={(e) => setUserMenuAnchor(e.currentTarget)}
+                      size="small"
+                      sx={{ ml: 1 }}
+                    >
+                      <Avatar
+                        sx={{
+                          width: 36,
+                          height: 36,
+                          bgcolor: ROLE_CONFIG[currentUser.role as UserRole]?.color === 'error' 
+                            ? '#ef4444' 
+                            : ROLE_CONFIG[currentUser.role as UserRole]?.color === 'primary'
+                            ? '#3b82f6'
+                            : '#10b981',
+                          fontSize: '0.875rem',
+                          fontWeight: 600,
+                        }}
+                      >
+                        {currentUser.username.slice(0, 2).toUpperCase()}
+                      </Avatar>
+                    </IconButton>
+                  </Tooltip>
+                  <Menu
+                    anchorEl={userMenuAnchor}
+                    open={userMenuOpen}
+                    onClose={() => setUserMenuAnchor(null)}
+                    anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                    transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+                    PaperProps={{
+                      sx: {
+                        minWidth: 240,
+                        mt: 1,
+                        background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.98) 0%, rgba(17, 24, 39, 0.98) 100%)',
+                        border: '1px solid rgba(255,255,255,0.1)',
+                      },
+                    }}
+                  >
+                    <Box sx={{ px: 2, py: 1.5 }}>
+                      <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                        {currentUser.username}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                        {currentUser.email}
+                      </Typography>
+                      <Box sx={{ mt: 1 }}>
+                        <RoleBadge role={currentUser.role as UserRole} />
+                      </Box>
+                    </Box>
+                    <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)' }} />
+                    <MenuItem onClick={handleLogout} sx={{ color: '#ef4444' }}>
+                      <ListItemIcon>
+                        <LogoutIcon fontSize="small" sx={{ color: '#ef4444' }} />
+                      </ListItemIcon>
+                      <ListItemText>Sign Out</ListItemText>
+                    </MenuItem>
+                  </Menu>
+                </>
+              )}
             </Box>
           </Box>
         </Toolbar>
@@ -942,6 +1180,7 @@ function MLDashboardPageInner() {
                 <SensorDashboard
                   machineId={selectedMachineId}
                   sensorData={sensorData || {}}
+                  baselineRanges={baselineRanges || undefined}
                   lastUpdated={lastSyncTime}
                   loading={!sensorData}
                   connected={isConnected}
@@ -965,7 +1204,9 @@ function MLDashboardPageInner() {
                   machineId={selectedMachineId}
                   sensorHistory={sensorHistory}
                   availableSensors={availableSensors}
-                  selectedSensors={availableSensors.slice(0, 3)}
+                  selectedSensors={selectedSensors}
+                  onSensorToggle={handleSensorToggle}
+                  baselineRanges={baselineRanges || undefined}
                   autoScroll={true}
                   maxDataPoints={120}
                 />
@@ -974,7 +1215,8 @@ function MLDashboardPageInner() {
                 <PredictionHistory
                   machineId={selectedMachineId}
                   predictions={predictionHistory}
-                  limit={100}
+                  limit={500}
+                  sessionId={getSessionId()}
                   onRowClick={(p) => {
                     if (!p.run_id) return;
                     setSelectedPredictionRunId(String(p.run_id));

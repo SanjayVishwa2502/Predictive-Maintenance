@@ -313,7 +313,13 @@ class MLExplainer:
             'confidence': confidence
         }
 
-    def explain_combined_run(self, machine_id: str, predictions: dict, sensor_data: dict) -> dict:
+    def explain_combined_run(
+        self,
+        machine_id: str,
+        predictions: dict,
+        sensor_data: dict,
+        baseline_ranges: str | None = None,
+    ) -> dict:
         """Generate ONE combined explanation for a run.
 
         This is the main lever to reduce end-to-end latency on CPU: one LLM call per
@@ -338,8 +344,13 @@ class MLExplainer:
             ts = {}
 
         failure_type = cls.get("failure_type") or cls.get("predicted_failure_type") or "unknown"
-        failure_probability = cls.get("failure_probability")
+        # NOTE:
+        # - Our classifier returns `confidence` as P(predicted_label).
+        # - It returns `failure_probability` as (1 - P(normal)).
+        # In combined reporting we want the probability to align with the label.
         cls_conf = cls.get("confidence")
+        classification_probability = cls_conf
+        failure_risk = cls.get("failure_probability")
 
         rul_hours = rul.get("rul_hours")
         rul_conf = rul.get("confidence")
@@ -359,8 +370,10 @@ class MLExplainer:
         user_message = COMBINED_RUN_PROMPT.format(
             machine_id=machine_id,
             sensor_readings=sensor_str,
+            baseline_ranges=(baseline_ranges or "unavailable"),
             failure_type=failure_type,
-            failure_probability=failure_probability,
+            classification_probability=classification_probability,
+            failure_risk=failure_risk,
             classification_confidence=cls_conf,
             rul_hours=rul_hours,
             rul_confidence=rul_conf,

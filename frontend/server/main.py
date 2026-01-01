@@ -23,6 +23,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from config import settings
+from database import check_db_connection, init_db
 
 # Configure logging
 logging.basicConfig(
@@ -49,7 +50,16 @@ async def lifespan(app: FastAPI):
     logger.info(f"Debug mode: {settings.DEBUG}")
     logger.info("=" * 80)
     
-    # TODO: Initialize database connections
+    # Initialize database connection and ensure tables exist.
+    # Phase 3.7.1.2/3.7.1.3: required for persisting users to PostgreSQL.
+    if not check_db_connection():
+        logger.error("❌ Database connection failed on startup")
+    else:
+        try:
+            init_db()
+        except Exception:
+            logger.exception("❌ Database initialization failed")
+
     # TODO: Initialize Redis connections
     # TODO: Load ML models
     
@@ -104,6 +114,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
+    allow_origin_regex=getattr(settings, "CORS_ORIGIN_REGEX", None),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -120,6 +131,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 from api.routes import auth, gan, websocket, ml, ml_training, llm
 
 # Include routers with proper prefixes and tags
+# NOTE: Some routers already define their own prefix (e.g. auth: /api/auth).
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(gan.router, prefix="/api/gan", tags=["GAN"])
 app.include_router(ml.router, tags=["ML Predictions"])  # Day 19.2: ML API integration

@@ -65,11 +65,14 @@ def init_db() -> None:
     Note: In production, use Alembic migrations instead.
     This function is for development/testing only.
     """
-    from .db import models  # Import models to register them with Base
+    # Import models to register them with Base.
+    # NOTE: This project is not packaged as a Python package here; use absolute
+    # imports so this works regardless of how uvicorn is invoked.
+    from db import models  # noqa: F401
     
     logger.info("Creating database tables...")
     Base.metadata.create_all(bind=engine)
-    logger.info("✅ Database tables created successfully")
+    logger.info("Database tables created successfully")
 
 
 def check_db_connection() -> bool:
@@ -83,7 +86,7 @@ def check_db_connection() -> bool:
         from sqlalchemy import text
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
-        logger.info("✅ Database connection successful")
+        logger.info("Database connection successful")
         return True
     except Exception as e:
         logger.error(f"❌ Database connection failed: {e}")

@@ -306,7 +306,7 @@ python create_database.py
 Create `frontend/server/.env` file:
 
 ```env
-DATABASE_URL=postgresql://postgres:password@localhost:5433/predictive_maintenance
+DATABASE_URL=postgresql://postgres:<your_password>@localhost:5433/predictive_maintenance
 REDIS_URL=redis://localhost:6379/0
 SECRET_KEY=<your-secret-key>
 CELERY_BROKER_URL=redis://localhost:6379/0

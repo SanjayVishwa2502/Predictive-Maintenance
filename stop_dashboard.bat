@@ -6,6 +6,9 @@ echo.
 
 echo Closing all PowerShell windows (Backend, Celery, Frontend)...
 
+REM Stop Printer Logger (best-effort)
+for /f "tokens=2 delims==" %%p in ('wmic process where "CommandLine like '%%datalogger.py%%'" get ProcessId /value ^| find "ProcessId"') do taskkill /F /PID %%p /T >nul 2>&1
+
 REM Kill all node processes (Frontend)
 taskkill /F /IM node.exe /T >nul 2>&1
 

@@ -55,7 +55,16 @@ def train_regression_fast(machine_id, time_limit=900):
         # Step 2: Verify RUL column exists
         target_col = 'rul'
         if target_col not in train_df.columns:
-            raise ValueError(f"RUL column '{target_col}' not found in data! Available columns: {list(train_df.columns)}")
+            print(
+                f"⚠️  RUL column '{target_col}' not found for {machine_id}. "
+                "Skipping regression (RUL) training."
+            )
+            return {
+                'machine_id': machine_id,
+                'task_type': 'regression',
+                'status': 'skipped',
+                'reason': "RUL column not found in synthetic data",
+            }
         
         print(f"  ✓ RUL column verified in data")
         

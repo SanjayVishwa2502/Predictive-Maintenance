@@ -1,20 +1,26 @@
-"""
-Configuration Management
+"""Configuration management.
+
 Phase 3.7.1.1: Project Initialization - Industrial Grade
 
-Pydantic Settings for type-safe environment variable loading.
-Follows 12-factor app methodology.
+Important: this project is often started from different working directories
+(repo root, `frontend/server`, etc). We must load the correct `.env` reliably
+regardless of CWD so DB/auth settings (e.g. PostgreSQL port) are applied.
 """
 
+from pathlib import Path
+from typing import List, Optional
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import List
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
     
     model_config = SettingsConfigDict(
-        env_file=".env",
+        # Always load the `.env` that sits next to this config module.
+        # This avoids subtle misconfiguration when uvicorn is started from
+        # the repo root (or any other CWD).
+        env_file=str(Path(__file__).resolve().parent / ".env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"
@@ -46,7 +52,10 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     
     # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://localhost:3000"]
+    CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173", "http://127.0.0.1:3000"]
+    # Allow any localhost/127.0.0.1 port during dev (Vite may choose 5174+, etc.).
+    # Use env var CORS_ORIGIN_REGEX to override.
+    CORS_ORIGIN_REGEX: Optional[str] = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
     
     # Paths
     GAN_ROOT_PATH: str = "GAN"

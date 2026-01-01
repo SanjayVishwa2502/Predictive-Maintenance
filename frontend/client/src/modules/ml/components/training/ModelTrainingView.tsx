@@ -14,6 +14,43 @@ import { ALL_MODELS, ModelTypeSelector } from './ModelTypeSelector';
 import { DEFAULT_TRAINING_CONFIG, TrainingConfigForm } from './TrainingConfigForm';
 import { TrainingProgressMonitor } from './TrainingProgressMonitor';
 
+const ACCESS_TOKEN_KEY = 'pm_access_token';
+const REFRESH_TOKEN_KEY = 'pm_refresh_token';
+
+function getAccessToken(): string | null {
+  try {
+    const token = window.localStorage.getItem(ACCESS_TOKEN_KEY);
+    return token && token.trim() ? token : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearTokens(): void {
+  try {
+    window.localStorage.removeItem(ACCESS_TOKEN_KEY);
+    window.localStorage.removeItem(REFRESH_TOKEN_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+async function fetchWithAuth(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  const token = getAccessToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const resp = await fetch(input, { ...init, headers });
+  if (resp.status === 401) {
+    clearTokens();
+    try {
+      window.location.reload();
+    } catch {
+      // ignore
+    }
+  }
+  return resp;
+}
+
 type InventoryStatus = 'missing' | 'available' | 'corrupted';
 
 type InventoryEntry = {
@@ -69,7 +106,7 @@ export default function ModelTrainingView() {
       setMachinesLoading(true);
       setMachinesError(null);
       try {
-        const invResp = await fetch(`${API_BASE}/api/ml/models/inventory`, {
+        const invResp = await fetchWithAuth(`${API_BASE}/api/ml/models/inventory`, {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' },
         });

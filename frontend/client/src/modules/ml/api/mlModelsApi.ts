@@ -9,6 +9,22 @@ import type { AxiosResponse } from 'axios';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
+const ACCESS_TOKEN_KEY = 'pm_access_token';
+
+function getAccessToken(): string | null {
+  try {
+    const token = window.localStorage.getItem(ACCESS_TOKEN_KEY);
+    return token && token.trim() ? token : null;
+  } catch {
+    return null;
+  }
+}
+
+function authHeaders(): Record<string, string> {
+  const token = getAccessToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 export type InventoryStatus = 'missing' | 'available' | 'corrupted';
 export type ModelType = 'classification' | 'regression' | 'anomaly' | 'timeseries';
 
@@ -48,20 +64,22 @@ export interface DeleteAllModelsResponse {
 
 export const mlModelsApi = {
   getInventory: async (): Promise<ModelInventoryResponse> => {
-    const resp: AxiosResponse<ModelInventoryResponse> = await axios.get(`${API_BASE}/api/ml/models/inventory`);
+    const resp: AxiosResponse<ModelInventoryResponse> = await axios.get(`${API_BASE}/api/ml/models/inventory`, { headers: authHeaders() });
     return resp.data;
   },
 
   deleteModel: async (machineId: string, modelType: ModelType): Promise<DeleteModelResponse> => {
     const resp: AxiosResponse<DeleteModelResponse> = await axios.delete(
-      `${API_BASE}/api/ml/models/${encodeURIComponent(machineId)}/${encodeURIComponent(modelType)}`
+      `${API_BASE}/api/ml/models/${encodeURIComponent(machineId)}/${encodeURIComponent(modelType)}`,
+      { headers: authHeaders() }
     );
     return resp.data;
   },
 
   deleteAllModels: async (machineId: string): Promise<DeleteAllModelsResponse> => {
     const resp: AxiosResponse<DeleteAllModelsResponse> = await axios.delete(
-      `${API_BASE}/api/ml/models/${encodeURIComponent(machineId)}`
+      `${API_BASE}/api/ml/models/${encodeURIComponent(machineId)}`,
+      { headers: authHeaders() }
     );
     return resp.data;
   },

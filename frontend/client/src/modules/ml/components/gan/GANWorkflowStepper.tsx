@@ -29,7 +29,6 @@ import {
   PlayArrow as PlayIcon,
   Refresh as RefreshIcon,
 } from '@mui/icons-material';
-import { useTheme } from '@mui/material/styles';
 import {
   LineChart,
   Line,
@@ -39,6 +38,8 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from 'recharts';
+
+import TrainingProgressChart from './TrainingProgressChart';
 
 import { ganApi } from '../../api/ganApi';
 import { useTaskSession } from '../../context/TaskSessionContext';
@@ -94,7 +95,6 @@ function makeIllustrativeRulDecay(points = 50) {
 
 export default function GANWorkflowStepper({ machineId, onBackToList }: GANWorkflowStepperProps) {
   const { registerRunningTask, updateTaskFromStatus } = useTaskSession();
-  const theme = useTheme();
   const [activeStep, setActiveStep] = useState(0);
 
   const [machineDetails, setMachineDetails] = useState<MachineDetails | null>(null);
@@ -180,11 +180,26 @@ export default function GANWorkflowStepper({ machineId, onBackToList }: GANWorkf
 
         const epoch = status.progress?.epoch;
         const loss = status.progress?.loss;
-        if (typeof epoch === 'number' && typeof loss === 'number') {
+        if (typeof epoch === 'number' && typeof loss === 'number' && Number.isFinite(epoch) && Number.isFinite(loss)) {
+          const epochInt = Math.floor(epoch);
           const lastEpoch = lastLossEpochRef.current;
-          if (lastEpoch === null || epoch > lastEpoch) {
-            lastLossEpochRef.current = epoch;
-            setLossPoints((prev) => [...prev, { epoch, loss }]);
+          if (lastEpoch === null || epochInt > lastEpoch) {
+            lastLossEpochRef.current = epochInt;
+            setLossPoints((prev) => {
+              const next = [...prev, { epoch: epochInt, loss }];
+              // Keep memory bounded during long trainings
+              return next.length > 5000 ? next.slice(next.length - 5000) : next;
+            });
+          } else if (epochInt === lastEpoch) {
+            // Some backends report multiple loss updates per epoch; update last point.
+            setLossPoints((prev) => {
+              if (!prev.length) return [{ epoch: epochInt, loss }];
+              const last = prev[prev.length - 1];
+              if (last.epoch !== epochInt) return prev;
+              const next = prev.slice(0, -1);
+              next.push({ epoch: epochInt, loss });
+              return next;
+            });
           }
         }
 
@@ -449,17 +464,7 @@ export default function GANWorkflowStepper({ machineId, onBackToList }: GANWorkf
                 <Divider />
 
                 <Typography variant="subtitle2">Loss curve</Typography>
-                <Box sx={{ height: 240 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={lossPoints}>
-                      <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
-                      <XAxis dataKey="epoch" />
-                      <YAxis />
-                      <Tooltip />
-                      <Line type="monotone" dataKey="loss" stroke={theme.palette.success.main} dot={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </Box>
+                <TrainingProgressChart data={lossPoints} height={240} smoothingWindow={5} />
 
                 <Stack direction="row" spacing={1}>
                   <Button

@@ -12,6 +12,22 @@ import type { TaskStatusResponse } from '../types/gan.types';
 // Get API base URL from environment
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
+const ACCESS_TOKEN_KEY = 'pm_access_token';
+
+function getAccessToken(): string | null {
+  try {
+    const token = window.localStorage.getItem(ACCESS_TOKEN_KEY);
+    return token && token.trim() ? token : null;
+  } catch {
+    return null;
+  }
+}
+
+function authHeaders(): Record<string, string> {
+  const token = getAccessToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 export type ModelType = 'classification' | 'regression' | 'anomaly' | 'timeseries';
 
 export interface StartTrainingRequest {
@@ -118,7 +134,8 @@ export const mlTrainingApi = {
         machine_id: request.machine_id,
         model_types: request.model_types,
         time_limit_per_model: request.time_limit_per_model,
-      }
+      },
+      { headers: authHeaders() }
     );
     return response.data;
   },
@@ -127,7 +144,7 @@ export const mlTrainingApi = {
    * Poll ML training task status (same shape as GAN TaskStatusResponse).
    */
   getTaskStatus: async (taskId: string): Promise<TaskStatusResponse> => {
-    const response: AxiosResponse<TaskStatusResponse> = await axios.get(`${API_BASE}/api/ml/tasks/${taskId}`);
+    const response: AxiosResponse<TaskStatusResponse> = await axios.get(`${API_BASE}/api/ml/tasks/${taskId}`, { headers: authHeaders() });
     return response.data;
   },
 
@@ -136,7 +153,9 @@ export const mlTrainingApi = {
    */
   cancelTask: async (taskId: string): Promise<{ success: boolean; task_id: string; message: string }> => {
     const response: AxiosResponse<{ success: boolean; task_id: string; message: string }> = await axios.post(
-      `${API_BASE}/api/ml/tasks/${taskId}/cancel`
+      `${API_BASE}/api/ml/tasks/${taskId}/cancel`,
+      null,
+      { headers: authHeaders() }
     );
     return response.data;
   },

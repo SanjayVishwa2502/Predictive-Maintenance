@@ -27,6 +27,7 @@ def verify_database():
     tables = inspector.get_table_names()
     
     expected_tables = [
+        "users",
         "machines",
         "gan_training_jobs",
         "predictions",

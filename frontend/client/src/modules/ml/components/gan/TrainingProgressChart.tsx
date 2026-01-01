@@ -16,6 +16,34 @@ import { exportFirstSvgInContainerAsPng } from './chartExport';
 
 export type LossPoint = { epoch: number; loss: number };
 
+function normalizeLossPoints(points: LossPoint[], maxPoints = 5000): LossPoint[] {
+  const filtered = points.filter(
+    (p) =>
+      typeof p?.epoch === 'number' &&
+      typeof p?.loss === 'number' &&
+      Number.isFinite(p.epoch) &&
+      Number.isFinite(p.loss)
+  );
+
+  if (!filtered.length) return [];
+
+  // Ensure stable X order
+  filtered.sort((a, b) => a.epoch - b.epoch);
+
+  // Deduplicate epochs (keep last value for an epoch)
+  const out: LossPoint[] = [];
+  for (const p of filtered) {
+    const last = out[out.length - 1];
+    if (last && last.epoch === p.epoch) {
+      out[out.length - 1] = p;
+    } else {
+      out.push(p);
+    }
+  }
+
+  return out.length > maxPoints ? out.slice(out.length - maxPoints) : out;
+}
+
 interface TrainingProgressChartProps {
   title?: string;
   data: LossPoint[];
@@ -39,6 +67,36 @@ function movingAverage(values: number[], windowSize: number) {
   return out;
 }
 
+const LossTooltip = ({ active, payload, label }: any) => {
+  if (!active || !payload?.length) return null;
+  const p = payload[0];
+  const value = typeof p?.value === 'number' && Number.isFinite(p.value) ? p.value : null;
+  const epoch = typeof label === 'number' && Number.isFinite(label) ? label : null;
+
+  return (
+    <Box
+      sx={{
+        px: 1.25,
+        py: 0.75,
+        borderRadius: 1,
+        bgcolor: 'background.paper',
+        border: '1px solid',
+        borderColor: 'divider',
+        boxShadow: 3,
+        pointerEvents: 'none',
+        minWidth: 140,
+      }}
+    >
+      <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary' }}>
+        Epoch: {epoch ?? '—'}
+      </Typography>
+      <Typography variant="caption" sx={{ display: 'block', color: 'text.primary' }}>
+        Loss: {value !== null ? value.toFixed(6) : '—'}
+      </Typography>
+    </Box>
+  );
+};
+
 export default function TrainingProgressChart({
   title = 'Training Loss Curve',
   data,
@@ -49,11 +107,13 @@ export default function TrainingProgressChart({
   const theme = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
 
+  const normalized = useMemo(() => normalizeLossPoints(data), [data]);
+
   const chartData = useMemo(() => {
-    const losses = data.map((d) => d.loss);
+    const losses = normalized.map((d) => d.loss);
     const smoothed = movingAverage(losses, smoothingWindow);
-    return data.map((d, i) => ({ ...d, loss_smooth: smoothed[i] }));
-  }, [data, smoothingWindow]);
+    return normalized.map((d, i) => ({ ...d, loss_smooth: smoothed[i] }));
+  }, [normalized, smoothingWindow]);
 
   const best = useMemo(() => {
     if (!chartData.length) return null;
@@ -85,9 +145,14 @@ export default function TrainingProgressChart({
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={chartData}>
             <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
-            <XAxis dataKey="epoch" />
+            <XAxis dataKey="epoch" type="number" domain={['dataMin', 'dataMax']} allowDecimals={false} />
             <YAxis />
-            <Tooltip />
+            <Tooltip
+              isAnimationActive={false}
+              animationDuration={0}
+              content={<LossTooltip />}
+              wrapperStyle={{ outline: 'none' }}
+            />
 
             <Line
               type="monotone"
@@ -95,6 +160,7 @@ export default function TrainingProgressChart({
               name="Loss (smoothed)"
               stroke={theme.palette.success.main}
               dot={false}
+              isAnimationActive={false}
             />
 
             {best && (

@@ -35,7 +35,10 @@ from utils.security import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/auth", tags=["Authentication"])
+# NOTE: The FastAPI app mounts this router under the `/api/auth` prefix.
+# Keeping the router prefix empty prevents accidental double-prefixes like
+# `/api/auth/api/auth/*` if the app is also configured with a prefix.
+router = APIRouter(tags=["Authentication"])
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)

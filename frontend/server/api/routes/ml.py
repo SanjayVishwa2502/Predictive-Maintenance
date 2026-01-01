@@ -49,9 +49,11 @@ from pathlib import Path as PathLib
 sys.path.append(str(PathLib(__file__).resolve().parents[2]))
 from services.ml_manager import ml_manager
 from services.sensor_simulator import get_simulator
+from services.printer_log_reader import read_latest_printer_reading, reading_to_status_fields
 from services.history_store import add_snapshot, list_snapshots, list_runs, get_run
 from services.auto_prediction_runner import auto_prediction_runner
 from services.audit_csv import list_datasets, latest_dataset_path
+from services.wide_dataset_csv import append_snapshot_row, latest_wide_dataset_path
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -346,6 +348,12 @@ async def list_machines():
                 or getattr(m, 'has_timeseries_model', False)
             )
         ]
+
+        # Single-printer streaming (Ender 3): expose it when a clean temp log exists.
+        # This allows monitoring even before any ML models are trained.
+        # NOTE: We intentionally do NOT inject an extra non-metadata printer id here.
+        # The printer should be represented by its canonical metadata id
+        # (e.g. "printer_creality_ender3_001") to match the rest of the system.
         
         # Convert to Pydantic models (machines_data is already list of MachineInfo dataclasses)
         from dataclasses import asdict
@@ -395,13 +403,75 @@ async def list_machines():
     }
 )
 async def get_machine_status(
-    machine_id: str = Path(..., description="Machine identifier")
+    machine_id: str = Path(..., description="Machine identifier"),
+    session_id: str = Query("", description="Per-browser-session id for dataset capture"),
+    client_id: str = Query("", description="Dashboard client id (for correlation only)"),
 ):
     """
     Get current status and sensor readings for a machine
     """
     try:
         logger.info(f"Getting status for machine: {machine_id}")
+
+        # Prefer real printer streaming data (clean CSV) when available.
+        # IMPORTANT: allow monitoring-only mode even if MLManager has no metadata for this machine_id.
+        printer_reading = read_latest_printer_reading(machine_id)
+        if printer_reading is not None:
+            from services.auto_prediction_service import (
+                should_run_prediction,
+                run_prediction_only,
+                preload_models_for_machine,
+            )
+            
+            # Preload models on first status call for this machine
+            preload_models_for_machine(machine_id)
+            
+            status = {
+                "machine_id": machine_id,
+                **reading_to_status_fields(printer_reading),
+            }
+            
+            # Store snapshot and check for auto-prediction
+            sensor_data = status.get("latest_sensors", {})
+            if sensor_data:
+                try:
+                    stamp = status["last_update"].astimezone(timezone.utc).isoformat().replace("+00:00", "Z") if status.get("last_update") else datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                    await add_snapshot(
+                        machine_id=machine_id,
+                        sensor_data=sensor_data,
+                        data_stamp=stamp,
+                    )
+                    status["data_stamp"] = stamp
+                    
+                    # Auto-prediction every 5th data point (ML only, no LLM)
+                    if should_run_prediction(machine_id):
+                        logger.info(f"[AUTO] Triggering prediction-only run for {machine_id}")
+                        pred_result = await run_prediction_only(
+                            machine_id=machine_id,
+                            sensor_data=sensor_data,
+                            data_stamp=stamp,
+                        )
+                        if pred_result:
+                            status["auto_prediction"] = {
+                                "run_id": pred_result.get("run_id"),
+                                "run_type": "prediction",
+                            }
+                            logger.info(f"[OK] Auto prediction completed for {machine_id}: {pred_result.get('run_id')}")
+                    
+                    # Wide CSV dataset capture
+                    if session_id:
+                        append_snapshot_row(
+                            machine_id=machine_id,
+                            session_id=session_id,
+                            data_stamp=stamp,
+                            sensor_data=sensor_data,
+                            client_id=client_id,
+                            run_id=str(status.get("auto_prediction", {}).get("run_id") or ""),
+                        )
+                except Exception as e:
+                    logger.debug(f"Snapshot persistence skipped for {machine_id}: {e}")
+            
+            return MachineStatusResponse(**status)
         
         # Get machine info from MLManager
         machine_info = ml_manager.get_machine_info(machine_id)
@@ -409,7 +479,7 @@ async def get_machine_status(
         if machine_info is None:
             raise HTTPException(status_code=404, detail=f"Machine not found: {machine_id}")
         
-        # Get sensor simulator
+        # Fall back to the existing validation-data simulator.
         simulator = get_simulator()
 
         # Auto-start simulation for machines that have validation data.
@@ -433,13 +503,13 @@ async def get_machine_status(
                 logger.debug(
                     f"Returning simulated sensor data for {machine_id}: {len(latest_sensors)} sensors"
                 )
-        
+
         status = {
             "machine_id": machine_id,
             "is_running": is_running,
             "latest_sensors": latest_sensors,
             "last_update": datetime.now(),
-            "sensor_count": len(latest_sensors) if latest_sensors else machine_info.sensor_count
+            "sensor_count": len(latest_sensors) if latest_sensors else machine_info.sensor_count,
         }
 
         # Store the 5-second datapoints for history. Best-effort only.
@@ -452,6 +522,17 @@ async def get_machine_status(
                     data_stamp=stamp,
                 )
                 status["data_stamp"] = stamp
+
+                # Wide CSV dataset capture (Excel-friendly, per session). Best-effort only.
+                if session_id:
+                    append_snapshot_row(
+                        machine_id=machine_id,
+                        session_id=session_id,
+                        data_stamp=stamp,
+                        sensor_data=latest_sensors,
+                        client_id=client_id,
+                        run_id=str(status.get("run_id") or ""),
+                    )
             except Exception as e:
                 logger.debug(f"Snapshot persistence skipped for {machine_id}: {e}")
         
@@ -515,6 +596,33 @@ async def download_latest_audit_dataset(
     except Exception as e:
         logger.error(f"Failed to download audit dataset for {machine_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to download dataset: {str(e)}")
+
+
+@router.get(
+    "/machines/{machine_id}/audit/wide/latest",
+    summary="Download latest wide dataset (CSV)",
+    description="Download an Excel-friendly wide CSV for this machine and session_id (one column per sensor).",
+)
+async def download_latest_wide_dataset(
+    machine_id: str = Path(..., description="Machine identifier"),
+    session_id: str = Query("", description="Per-browser-session id"),
+):
+    try:
+        if not session_id.strip():
+            raise HTTPException(status_code=400, detail="session_id is required")
+        p = latest_wide_dataset_path(machine_id, session_id)
+        if not p or not p.exists():
+            raise HTTPException(status_code=404, detail="No wide dataset found for this session")
+        return FileResponse(
+            path=str(p),
+            filename=p.name,
+            media_type="text/csv",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to download wide dataset for {machine_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to download wide dataset: {str(e)}")
 
 
 @router.get(
@@ -633,9 +741,10 @@ async def auto_runs_status(
 async def auto_run_once(
     machine_id: str = Path(..., description="Machine identifier"),
     client_id: str = Query("", description="Dashboard client id for WS push updates"),
+    session_id: str = Query("", description="Per-browser-session id for dataset capture"),
 ):
     try:
-        return await auto_prediction_runner.run_once(machine_id, client_id=client_id)
+        return await auto_prediction_runner.run_once(machine_id, client_id=client_id, session_id=session_id)
     except Exception as e:
         logger.error(f"Failed to run once for {machine_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to run once: {str(e)}")

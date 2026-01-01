@@ -48,6 +48,16 @@ export interface SensorDashboardProps {
   machineId: string;
   machineName?: string;
   sensorData: Record<string, number> | null;
+  baselineRanges?: Record<
+    string,
+    {
+      min?: number | null;
+      typical?: number | null;
+      max?: number | null;
+      alarm?: number | null;
+      trip?: number | null;
+    }
+  >;
   lastUpdated: Date | null;
   loading?: boolean;
   connected?: boolean;
@@ -58,7 +68,7 @@ interface SensorCardProps {
   name: string;
   value: number;
   unit: string;
-  threshold?: { warning: number; critical: number };
+  threshold?: { warning: number; critical: number; min?: number };
   icon: React.ReactNode;
 }
 
@@ -152,6 +162,34 @@ const getDefaultThreshold = (sensorName: string): { warning: number; critical: n
   }
   
   return undefined;
+};
+
+const getBaselineThreshold = (
+  sensorName: string,
+  baselineRanges?: SensorDashboardProps['baselineRanges']
+): { warning: number; critical: number; min?: number } | undefined => {
+  if (!baselineRanges) return undefined;
+
+  const direct = baselineRanges[sensorName];
+  const lower = baselineRanges[sensorName.toLowerCase()];
+  const underscored = baselineRanges[sensorName.replace(/\s+/g, '_')];
+  const range = direct || lower || underscored;
+  if (!range) return undefined;
+
+  const toNum = (v: unknown): number | undefined => {
+    if (typeof v === 'number' && !isNaN(v)) return v;
+    return undefined;
+  };
+
+  const alarm = toNum(range.alarm) ?? toNum(range.max) ?? toNum(range.trip);
+  const trip = toNum(range.trip) ?? alarm;
+  if (alarm === undefined || trip === undefined) return undefined;
+
+  const warning = Math.min(alarm, trip);
+  const critical = Math.max(alarm, trip);
+  const min = toNum(range.min);
+
+  return { warning, critical, ...(min !== undefined ? { min } : {}) };
 };
 
 const parseSensorName = (sensorName: string): string => {
@@ -309,7 +347,7 @@ const SensorCard: React.FC<SensorCardProps> = ({
           {threshold && (
             <Stack direction="row" justifyContent="space-between" sx={{ mt: 0.5 }}>
               <Typography variant="caption" sx={{ fontSize: '0.65rem', color: 'text.disabled' }}>
-                0
+                {typeof threshold.min === 'number' && !isNaN(threshold.min) ? threshold.min : 0}
               </Typography>
               <Typography variant="caption" sx={{ fontSize: '0.65rem', color: '#fbbf24' }}>
                 ⚠ {threshold.warning}
@@ -333,6 +371,7 @@ const SensorDashboard: React.FC<SensorDashboardProps> = ({
   machineId,
   machineName,
   sensorData,
+  baselineRanges,
   lastUpdated,
   loading = false,
   connected = false,
@@ -360,7 +399,15 @@ const SensorDashboard: React.FC<SensorDashboardProps> = ({
       const displayName = parseSensorName(sensorName);
       const unit = parseSensorUnit(sensorName);
       const icon = getSensorIcon(sensorName);
-      const threshold = getDefaultThreshold(sensorName);
+      const prefix = `${(machineId || '').trim().toLowerCase()}_`;
+      const normalizedSensorKey = sensorName.toLowerCase().startsWith(prefix)
+        ? sensorName.slice(prefix.length)
+        : sensorName;
+
+      const threshold =
+        getBaselineThreshold(normalizedSensorKey, baselineRanges) ||
+        getDefaultThreshold(normalizedSensorKey) ||
+        getDefaultThreshold(sensorName);
       
       return {
         key: sensorName,
@@ -371,7 +418,7 @@ const SensorDashboard: React.FC<SensorDashboardProps> = ({
         threshold,
       };
     });
-  }, [sensorData]);
+  }, [sensorData, baselineRanges, machineId]);
 
   // Empty State: No machine selected
   if (!machineId) {

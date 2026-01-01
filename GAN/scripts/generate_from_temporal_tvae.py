@@ -148,32 +148,36 @@ def generate_temporal_data(machine_id, num_samples=50000, train_split=0.70, val_
     # AFTER splitting so that each split (train/val/test) has its own full
     # lifecycle curve from max_rul → 0 with strictly increasing timestamps.
     print(f"\n   [AUTO-FIX] Applying chronological ordering...")
-    print(f"   - Sorting by generated RUL (descending) to preserve rank")
-    print(f"   - Will assign per-split RUL + timestamps after splitting")
-
-    if 'rul' not in synthetic_data.columns:
-        raise ValueError(
-            f"RUL column not found in generated data!\n"
-            f"Columns: {list(synthetic_data.columns)}\n"
-            f"Model may not have been retrained with temporal seed data."
-        )
-
-    synthetic_data = synthetic_data.sort_values('rul', ascending=False).reset_index(drop=True)
-    synthetic_data['__severity_rank'] = np.arange(len(synthetic_data), dtype=int)
+    has_rul = 'rul' in synthetic_data.columns
+    if has_rul:
+        print(f"   - Sorting by generated RUL (descending) to preserve rank")
+        print(f"   - Will assign per-split RUL + timestamps after splitting")
+        synthetic_data = synthetic_data.sort_values('rul', ascending=False).reset_index(drop=True)
+        synthetic_data['__severity_rank'] = np.arange(len(synthetic_data), dtype=int)
+    else:
+        # No-RUL machines: keep a stable order and only assign timestamps.
+        print(f"   - No RUL column present; skipping severity ranking")
+        print(f"   - Will assign per-split timestamps after splitting")
+        synthetic_data = synthetic_data.reset_index(drop=True)
+        synthetic_data['__severity_rank'] = np.arange(len(synthetic_data), dtype=int)
     
-    # Step 3: Verify RUL column exists
+    # Step 3: Verify RUL column exists (optional)
     print(f"\n[3/6] Verifying RUL column presence")
-    # RUL presence already checked above.
+    if not has_rul:
+        print(f"   RUL column present: NO (no-RUL machine)")
     
     # Load RUL profile for deterministic curve and time span.
     try:
         from GAN.config.rul_profiles import get_rul_profile
 
         rul_profile = get_rul_profile(machine_id) or {}
-        max_rul = float(rul_profile.get('max_rul', float(synthetic_data['rul'].max())))
+        if has_rul:
+            max_rul = float(rul_profile.get('max_rul', float(synthetic_data['rul'].max())))
+        else:
+            max_rul = float(rul_profile.get('max_rul', 24.0))
         pattern = str(rul_profile.get('degradation_pattern', 'linear_slow'))
     except Exception:
-        max_rul = float(synthetic_data['rul'].max())
+        max_rul = float(synthetic_data['rul'].max()) if has_rul else 24.0
         pattern = 'linear_slow'
 
     # Report based on the configured lifecycle curve (not the sampled distribution)
@@ -181,9 +185,10 @@ def generate_temporal_data(machine_id, num_samples=50000, train_split=0.70, val_
     rul_max = max_rul
     rul_mean = max_rul / 2.0
     
-    print(f"   RUL column present: YES")
-    print(f"   RUL range: [{rul_min:.1f}, {rul_max:.1f}]")
-    print(f"   RUL mean: {rul_mean:.1f}")
+    if has_rul:
+        print(f"   RUL column present: YES")
+        print(f"   RUL range: [{rul_min:.1f}, {rul_max:.1f}]")
+        print(f"   RUL mean: {rul_mean:.1f}")
     
     # Step 4: Split data (train/val/test)
     # Traditional ML split: RANDOM selection into splits.
@@ -206,9 +211,10 @@ def generate_temporal_data(machine_id, num_samples=50000, train_split=0.70, val_
     test_idx = indices[n_train + n_val:]
 
     def _finalize_split(df: pd.DataFrame) -> pd.DataFrame:
-        # Order by severity rank so the split itself has a run-to-failure sequence.
+        # Order by severity rank so the split itself is deterministic.
         df = df.sort_values('__severity_rank').reset_index(drop=True)
-        df['rul'] = _build_monotonic_rul_curve(max_rul=max_rul, n=len(df), pattern=pattern)
+        if has_rul:
+            df['rul'] = _build_monotonic_rul_curve(max_rul=max_rul, n=len(df), pattern=pattern)
         df['timestamp'] = _assign_sequential_timestamps(n=len(df), max_rul_hours=max_rul)
         return df
 
@@ -220,6 +226,9 @@ def generate_temporal_data(machine_id, num_samples=50000, train_split=0.70, val_
     for df in (train_data, val_data, test_data):
         if '__severity_rank' in df.columns:
             df.drop(columns=['__severity_rank'], inplace=True)
+
+    # Also drop helper columns from the in-memory full dataset used for stats.
+    synthetic_data_stats = synthetic_data.drop(columns=['__severity_rank'], errors='ignore')
     
     print(f"   Split mode: random (seed={seed})")
     print(f"   Train: {len(train_data):,} samples ({train_split*100:.0f}%)")
@@ -251,28 +260,32 @@ def generate_temporal_data(machine_id, num_samples=50000, train_split=0.70, val_
     print(f"\n[6/6] Calculating generation statistics")
     
     # Check for missing values
-    missing_total = synthetic_data.isnull().sum().sum()
-    missing_cols = synthetic_data.isnull().sum()[synthetic_data.isnull().sum() > 0]
+    missing_total = synthetic_data_stats.isnull().sum().sum()
+    missing_cols = synthetic_data_stats.isnull().sum()[synthetic_data_stats.isnull().sum() > 0]
     
     # Check for infinite values
-    numeric_cols = synthetic_data.select_dtypes(include=['float64', 'int64']).columns
+    numeric_cols = synthetic_data_stats.select_dtypes(include=['float64', 'int64']).columns
     inf_total = 0
     for col in numeric_cols:
-        inf_total += pd.isna(synthetic_data[col]).sum() + (synthetic_data[col] == float('inf')).sum() + (synthetic_data[col] == float('-inf')).sum()
+        inf_total += pd.isna(synthetic_data_stats[col]).sum() + (synthetic_data_stats[col] == float('inf')).sum() + (synthetic_data_stats[col] == float('-inf')).sum()
     
-    # RUL correlation with sensors
-    sensor_cols = [col for col in synthetic_data.columns if col not in ['timestamp', 'rul']]
+    # RUL correlation with sensors (optional)
+    sensor_cols = [col for col in synthetic_data_stats.columns if col not in ['timestamp', 'rul']]
     rul_correlations = {}
-    
-    if sensor_cols:
+
+    if has_rul and sensor_cols:
         for sensor in sensor_cols:
             if sensor in numeric_cols:
-                corr = synthetic_data['rul'].corr(synthetic_data[sensor])
+                corr = synthetic_data_stats['rul'].corr(synthetic_data_stats[sensor])
                 rul_correlations[sensor] = round(corr, 3)
-        
-        avg_corr = sum(rul_correlations.values()) / len(rul_correlations)
-        negative_count = sum(1 for c in rul_correlations.values() if c < 0)
-        negative_pct = (negative_count / len(rul_correlations)) * 100
+
+        if rul_correlations:
+            avg_corr = sum(rul_correlations.values()) / len(rul_correlations)
+            negative_count = sum(1 for c in rul_correlations.values() if c < 0)
+            negative_pct = (negative_count / len(rul_correlations)) * 100
+        else:
+            avg_corr = None
+            negative_pct = None
     else:
         avg_corr = None
         negative_pct = None
@@ -285,14 +298,14 @@ def generate_temporal_data(machine_id, num_samples=50000, train_split=0.70, val_
         'machine_id': machine_id,
         'generation_time_seconds': round(gen_time, 2),
         'total_time_seconds': round(total_time, 2),
-        'samples_generated': len(synthetic_data),
+        'samples_generated': len(synthetic_data_stats),
         'train_samples': len(train_data),
         'val_samples': len(val_data),
         'test_samples': len(test_data),
-        'features': len(synthetic_data.columns),
-        'rul_present': True,
-        'rul_range': [round(rul_min, 2), round(rul_max, 2)],
-        'rul_mean': round(rul_mean, 2),
+        'features': len(synthetic_data_stats.columns),
+        'rul_present': bool(has_rul),
+        'rul_range': [round(rul_min, 2), round(rul_max, 2)] if has_rul else None,
+        'rul_mean': round(rul_mean, 2) if has_rul else None,
         'missing_values': int(missing_total),
         'infinite_values': int(inf_total),
         'data_quality': 'PASS' if missing_total == 0 and inf_total == 0 else 'FAIL',
@@ -305,8 +318,8 @@ def generate_temporal_data(machine_id, num_samples=50000, train_split=0.70, val_
     }
     
     print(f"\n   Generation Statistics:")
-    print(f"   - Samples: {len(synthetic_data):,}")
-    print(f"   - Features: {len(synthetic_data.columns)}")
+    print(f"   - Samples: {len(synthetic_data_stats):,}")
+    print(f"   - Features: {len(synthetic_data_stats.columns)}")
     print(f"   - Missing values: {missing_total}")
     print(f"   - Infinite values: {inf_total}")
     print(f"   - Data quality: {results['data_quality']}")
@@ -324,10 +337,10 @@ def generate_temporal_data(machine_id, num_samples=50000, train_split=0.70, val_
     print(f"GENERATION COMPLETE: {machine_id}")
     print(f"{'=' * 80}")
     print(f"\nResults:")
-    print(f"   Generated: {len(synthetic_data):,} samples")
+    print(f"   Generated: {len(synthetic_data_stats):,} samples")
     print(f"   Time: {gen_time:.2f}s")
     print(f"   Size: {total_size_mb:.2f} MB")
-    print(f"   RUL present: YES")
+    print(f"   RUL present: {'YES' if has_rul else 'NO'}")
     print(f"   Data quality: {results['data_quality']}")
     print(f"   Output: {output_dir}")
     print(f"   Report: {report_path.name}")

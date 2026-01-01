@@ -69,6 +69,13 @@ export default function ProfileEditor({
 
         const hasBlocking = validation_errors.some((e) => (e as any).severity === 'error');
         const ok = Boolean(staged.valid) && Boolean(staged.can_proceed) && !hasBlocking;
+
+        // If the staged profile is now valid, regenerate metadata immediately so the next
+        // workflow steps (seed/model/synthetic) use the correct sensor set.
+        if (ok) {
+          await ganApi.generateStagedMetadata(profileId);
+        }
+
         onRevalidate(validation_errors, ok, staged.machine_id);
       } else {
         // Fallback: inline validation only (no staged profile to update)

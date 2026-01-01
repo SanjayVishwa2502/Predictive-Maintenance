@@ -18,6 +18,9 @@ from celery_app import celery_app
 from tasks import LoggingTask
 from config import settings
 from services.audit_csv import append_event
+from services.wide_dataset_csv import append_llm_row
+
+from pathlib import Path
 
 
 def _update_run_llm_best_effort(run_id: Any, use_case: str, summary: str, compute: str, task_id: str) -> None:
@@ -156,6 +159,66 @@ def _publish_llm_event(client_id: str, payload: Dict[str, Any]) -> None:
         return
 
 
+def _baseline_ranges_from_profile(machine_id: str, sensor_data: Dict[str, Any]) -> str:
+    """Best-effort: derive baseline normal ranges from the GAN machine profile.
+
+    For printers (e.g. Ender3) nozzle temps like ~210C are normal; without this context
+    the LLM tends to apply generic industrial thresholds.
+    """
+    mid = (machine_id or "").strip()
+    if not mid:
+        return "unavailable"
+
+    try:
+        # Note: Settings paths (e.g. GAN_ROOT_PATH) are configured relative to the
+        # frontend/server directory (where config.py and .env live), not repo root.
+        server_root = Path(__file__).resolve().parents[1]
+
+        gan_root_cfg = Path(str(settings.GAN_ROOT_PATH or "GAN"))
+        gan_root = gan_root_cfg if gan_root_cfg.is_absolute() else (server_root / gan_root_cfg).resolve()
+
+        profile_path = gan_root / "data" / "real_machines" / "profiles" / f"{mid}.json"
+        if not profile_path.exists():
+            return "unavailable"
+
+        obj = json.loads(profile_path.read_text(encoding="utf-8"))
+        baseline = obj.get("baseline_normal_operation") or {}
+
+        # Flatten baseline blocks into a {sensor_name: spec_dict} map.
+        sensor_specs: Dict[str, Any] = {}
+        for _block_name, block in (baseline or {}).items():
+            if isinstance(block, dict):
+                for sensor_name, spec in block.items():
+                    if isinstance(spec, dict):
+                        sensor_specs[str(sensor_name)] = spec
+
+        if not sensor_specs:
+            return "unavailable"
+
+        # Only include sensors actually present in current data.
+        current_keys = {str(k) for k in (sensor_data or {}).keys()}
+
+        lines = []
+        for name, spec in sensor_specs.items():
+            if name not in current_keys:
+                continue
+            unit = str(spec.get("unit") or "")
+            # Avoid encoding artifacts ("Â°C") and keep prompts ASCII-friendly.
+            unit = unit.replace("Â°C", "C").replace("°C", "C").replace("Â°F", "F").replace("°F", "F")
+            parts = []
+            for key in ("min", "typical", "max", "alarm", "trip"):
+                if key in spec and spec.get(key) is not None:
+                    parts.append(f"{key}={spec.get(key)}")
+            if not parts:
+                continue
+            suffix = f" {unit}" if unit else ""
+            lines.append(f"{name}: {', '.join(parts)}{suffix}")
+
+        return "\n".join(lines) if lines else "unavailable"
+    except Exception:
+        return "unavailable"
+
+
 @celery_app.task(bind=True, base=LoggingTask, name="tasks.llm_tasks.generate_explanation")
 def generate_explanation(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     """Generate an explanation from prediction context.
@@ -173,6 +236,7 @@ def generate_explanation(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
     machine_id = str(payload.get("machine_id") or "")
     client_id = str(payload.get("client_id") or "")
+    session_id = str(payload.get("session_id") or "")
     run_id = payload.get("run_id")
     celery_task_id = str(getattr(getattr(self, "request", None), "id", "") or "")
     requested_use_case = str(payload.get("use_case") or "").strip().lower() or "auto"
@@ -240,9 +304,18 @@ def generate_explanation(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 machine_id=machine_id,
                 predictions=predictions,
                 sensor_data=sensor_data,
+                baseline_ranges=_baseline_ranges_from_profile(machine_id, sensor_data),
             )
 
         explanation_text = str(llm_out.get("explanation") or "")
+        # Some stacks occasionally return mojibake for degree symbols (e.g. "Â°C").
+        # Normalize output to keep the dashboard readable.
+        explanation_text = (
+            explanation_text.replace("Â°C", " C")
+            .replace("°C", " C")
+            .replace("Â°F", " F")
+            .replace("°F", " F")
+        )
         sources = llm_out.get("sources") or []
         out_conf = llm_out.get("confidence")
 
@@ -284,6 +357,21 @@ def generate_explanation(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             celery_task_id,
         )
 
+        # Wide CSV dataset capture (Excel-friendly, per session). Best-effort only.
+        try:
+            if session_id.strip():
+                append_llm_row(
+                    machine_id=machine_id,
+                    session_id=session_id,
+                    data_stamp=str(data_stamp or ""),
+                    run_id=str(run_id or ""),
+                    task_id=celery_task_id,
+                    llm_summary=str(result.get("summary") or ""),
+                    client_id=client_id,
+                )
+        except Exception:
+            pass
+
         append_event(
             record_type="llm_task_succeeded",
             machine_id=machine_id,
@@ -319,6 +407,21 @@ def generate_explanation(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             result.get("compute") or "unknown",
             celery_task_id,
         )
+
+        # Wide CSV dataset capture (Excel-friendly, per session). Best-effort only.
+        try:
+            if session_id.strip():
+                append_llm_row(
+                    machine_id=machine_id,
+                    session_id=session_id,
+                    data_stamp=str(data_stamp or ""),
+                    run_id=str(run_id or ""),
+                    task_id=celery_task_id,
+                    llm_summary=str(result.get("summary") or ""),
+                    client_id=client_id,
+                )
+        except Exception:
+            pass
         append_event(
             record_type="llm_task_failed",
             machine_id=machine_id,

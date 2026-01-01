@@ -12,6 +12,7 @@ from celery_app import celery_app
 from services.ml_manager import ml_manager
 from services.sensor_simulator import get_simulator
 from services.history_store import SnapshotItem, add_snapshot, create_run, get_latest_snapshot
+from services.wide_dataset_csv import append_run_row
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,12 @@ class AutoPredictionRunner:
         self._client_ids.pop(mid, None)
         return self.status(mid)
 
-    async def run_once(self, machine_id: str, client_id: Optional[str] = None) -> Dict[str, Any]:
+    async def run_once(
+        self,
+        machine_id: str,
+        client_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         mid = (machine_id or "").strip()
         if not mid:
             raise ValueError("machine_id is required")
@@ -115,12 +121,29 @@ class AutoPredictionRunner:
         predictions = await self._predict_all(mid, snapshot)
         run = await create_run(mid, snapshot, predictions)
 
+        # Wide CSV dataset capture (Excel-friendly, per session). Best-effort only.
+        try:
+            sid = (session_id or "").strip()
+            if sid:
+                append_run_row(
+                    machine_id=mid,
+                    session_id=sid,
+                    data_stamp=run.data_stamp,
+                    run_id=run.run_id,
+                    sensor_data=snapshot.sensor_data or {},
+                    predictions=predictions or {},
+                    client_id=(cid or ""),
+                )
+        except Exception:
+            pass
+
         # Enqueue LLM explanations (async).
         # Prefer a dashboard/browser client_id so WS push updates reach the UI.
         client_id = self._client_ids.get(mid) or f"auto:{mid}"[:128]
         base_payload = {
             "machine_id": mid,
             "client_id": client_id,
+            "session_id": (session_id or "").strip(),
             "run_id": run.run_id,
             "data_stamp": run.data_stamp,
             "sensor_data": snapshot.sensor_data or {},
@@ -170,8 +193,16 @@ class AutoPredictionRunner:
 
         # RUL
         try:
-            rul = ml_manager.predict_rul(machine_id=machine_id, sensor_data=sensor_data)
-            out["rul"] = asdict(rul)
+            regression_path = ml_manager.models_dir / "regression" / machine_id
+            if not ml_manager._has_model_artifacts(regression_path):
+                out["rul"] = {
+                    "skipped": True,
+                    "reason": "no_rul_model",
+                    "message": "RUL: n/a (no RUL model for this machine)",
+                }
+            else:
+                rul = ml_manager.predict_rul(machine_id=machine_id, sensor_data=sensor_data)
+                out["rul"] = asdict(rul)
         except Exception as e:
             out["rul"] = {"error": str(e)}
 

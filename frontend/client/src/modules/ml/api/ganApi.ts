@@ -16,6 +16,7 @@ import type {
   MachineTemplate,
   MachineProfile,
   ProfileUploadResponse,
+  MetadataGenerationResponse,
   ValidationError,
   SeedGenerationRequest,
   SeedGenerationResponse,
@@ -28,10 +29,29 @@ import type {
   TaskStatusResponse,
   ValidateDataQualityResponse,
   VisualizationSummaryResponse,
+  MachineBaselineResponse,
 } from '../types/gan.types';
 
 // Get API base URL from environment
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+
+const ACCESS_TOKEN_KEY = 'pm_access_token';
+
+function getAccessToken(): string | null {
+  try {
+    const token = window.localStorage.getItem(ACCESS_TOKEN_KEY);
+    return token && token.trim() ? token : null;
+  } catch {
+    return null;
+  }
+}
+
+function authHeaders(extra?: Record<string, string>): Record<string, string> {
+  const token = getAccessToken();
+  const headers: Record<string, string> = { ...(extra || {}) };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
 
 function getClientId(): string {
   // A stable, per-browser identifier so the backend can persist/restore workflow state across refreshes.
@@ -74,7 +94,8 @@ export const ganApi = {
    */
   getTemplates: async (): Promise<MachineTemplate[]> => {
     const response: AxiosResponse<MachineTemplate[]> = await axios.get(
-      `${API_BASE}/api/gan/templates`
+      `${API_BASE}/api/gan/templates`,
+      { headers: authHeaders() }
     );
     return response.data;
   },
@@ -84,7 +105,8 @@ export const ganApi = {
    */
   getTemplate: async (machineType: string): Promise<MachineProfile> => {
     const response: AxiosResponse<MachineProfile> = await axios.get(
-      `${API_BASE}/api/gan/templates/${machineType}`
+      `${API_BASE}/api/gan/templates/${machineType}`,
+      { headers: authHeaders() }
     );
     return response.data;
   },
@@ -94,7 +116,8 @@ export const ganApi = {
    */
   getExampleProfile: async (machineType: string): Promise<MachineProfile> => {
     const response: AxiosResponse<MachineProfile> = await axios.get(
-      `${API_BASE}/api/gan/examples/${machineType}`
+      `${API_BASE}/api/gan/examples/${machineType}`,
+      { headers: authHeaders() }
     );
     return response.data;
   },
@@ -127,7 +150,8 @@ export const ganApi = {
       // Stage the profile on disk (backend performs immediate duplicate check)
       const uploadResp: AxiosResponse<any> = await axios.post(
         `${API_BASE}/api/gan/profiles/upload`,
-        profileData
+        profileData,
+        { headers: authHeaders() }
       );
 
       const profile_id = String(uploadResp.data?.profile_id || '');
@@ -140,7 +164,8 @@ export const ganApi = {
       // Validate the staged profile (full validator + 14 fallback rules)
       const validateResp: AxiosResponse<any> = await axios.post(
         `${API_BASE}/api/gan/profiles/${profile_id}/validate`,
-        { strict: true }
+        { strict: true },
+        { headers: authHeaders() }
       );
 
       const issues = (validateResp.data?.issues || []) as Array<{
@@ -159,6 +184,17 @@ export const ganApi = {
       const canProceed = Boolean(validateResp.data?.can_proceed);
       const hasBlocking = validation_errors.some((e) => e.severity === 'error');
       const status: 'validated' | 'invalid' = valid && canProceed && !hasBlocking ? 'validated' : 'invalid';
+
+      // If the staged profile is valid, immediately generate derived metadata so downstream
+      // seed/model/data generation never falls back to generic sensors.
+      if (status === 'validated') {
+        try {
+          await ganApi.generateStagedMetadata(profile_id);
+        } catch (e) {
+          // Fail loudly: metadata is required for a correct workflow.
+          throw e;
+        }
+      }
 
       return {
         profile_id,
@@ -201,7 +237,21 @@ export const ganApi = {
     const response: AxiosResponse<MachineDetails> = await axios.post(
       `${API_BASE}/api/gan/machines`,
       null,
-      { params: { profile_id: profileId } }
+      { params: { profile_id: profileId }, headers: authHeaders() }
+    );
+    return response.data;
+  },
+
+  // ========== BASELINE ==========
+
+  /**
+   * Get flattened baseline_normal_operation ranges for a machine.
+   * Used by the ML dashboard to render per-sensor warning/critical thresholds.
+   */
+  getMachineBaseline: async (machineId: string): Promise<MachineBaselineResponse> => {
+    const response: AxiosResponse<MachineBaselineResponse> = await axios.get(
+      `${API_BASE}/api/gan/machines/${machineId}/baseline`,
+      { headers: authHeaders() }
     );
     return response.data;
   },
@@ -218,7 +268,8 @@ export const ganApi = {
       {
         profile_data: profileData,
         strict: true,
-      }
+      },
+      { headers: authHeaders() }
     );
 
     const issues = (response.data?.issues || []) as Array<{
@@ -245,7 +296,7 @@ export const ganApi = {
    * This is required so the subsequent Create Machine uses the edited machine_id.
    */
   updateStagedProfile: async (profileId: string, profileData: object): Promise<void> => {
-    await axios.put(`${API_BASE}/api/gan/profiles/${profileId}/edit`, profileData);
+    await axios.put(`${API_BASE}/api/gan/profiles/${profileId}/edit`, profileData, { headers: authHeaders() });
   },
 
   /**
@@ -259,7 +310,8 @@ export const ganApi = {
   }> => {
     const resp: AxiosResponse<any> = await axios.post(
       `${API_BASE}/api/gan/profiles/${profileId}/validate`,
-      { strict: true }
+      { strict: true },
+      { headers: authHeaders() }
     );
     return {
       valid: Boolean(resp.data?.valid),
@@ -267,6 +319,19 @@ export const ganApi = {
       machine_id: String(resp.data?.machine_id || ''),
       issues: (resp.data?.issues || []) as any,
     };
+  },
+
+  /**
+   * Generate derived SDV-style metadata for a staged profile.
+   * Writes: GAN/metadata/<machine_id>_metadata.json
+   */
+  generateStagedMetadata: async (profileId: string): Promise<MetadataGenerationResponse> => {
+    const resp: AxiosResponse<MetadataGenerationResponse> = await axios.post(
+      `${API_BASE}/api/gan/profiles/${profileId}/generate-metadata`,
+      null,
+      { headers: authHeaders() }
+    );
+    return resp.data;
   },
 
   /**
@@ -278,7 +343,8 @@ export const ganApi = {
   ): Promise<MachineProfile> => {
     const response: AxiosResponse<MachineProfile> = await axios.put(
       `${API_BASE}/api/gan/profiles/${profileId}/edit`,
-      profileData
+      profileData,
+      { headers: authHeaders() }
     );
     return response.data;
   },
@@ -294,7 +360,8 @@ export const ganApi = {
   ): Promise<SeedGenerationResponse> => {
     const response: AxiosResponse<SeedGenerationResponse> = await axios.post(
       `${API_BASE}/api/gan/machines/${machineId}/seed`,
-      request
+      request,
+      { headers: authHeaders() }
     );
     return response.data;
   },
@@ -304,7 +371,7 @@ export const ganApi = {
   getContinueWorkflow: async (): Promise<ContinueWorkflowResponse> => {
     const resp: AxiosResponse<ContinueWorkflowResponse> = await axios.get(
       `${API_BASE}/api/gan/workflow/continue`,
-      { headers: { 'X-PM-Client-Id': getClientId() } }
+      { headers: authHeaders({ 'X-PM-Client-Id': getClientId() }) }
     );
     return resp.data;
   },
@@ -313,14 +380,14 @@ export const ganApi = {
     await axios.put(
       `${API_BASE}/api/gan/workflow/continue`,
       state,
-      { headers: { 'X-PM-Client-Id': getClientId() } }
+      { headers: authHeaders({ 'X-PM-Client-Id': getClientId() }) }
     );
   },
 
   clearContinueWorkflow: async (): Promise<void> => {
     await axios.delete(
       `${API_BASE}/api/gan/workflow/continue`,
-      { headers: { 'X-PM-Client-Id': getClientId() } }
+      { headers: authHeaders({ 'X-PM-Client-Id': getClientId() }) }
     );
   },
 
@@ -335,7 +402,8 @@ export const ganApi = {
   ): Promise<TrainingResponse> => {
     const response: AxiosResponse<TrainingResponse> = await axios.post(
       `${API_BASE}/api/gan/machines/${machineId}/train`,
-      request
+      request,
+      { headers: authHeaders() }
     );
     return response.data;
   },
@@ -345,7 +413,8 @@ export const ganApi = {
    */
   getTaskStatus: async (taskId: string): Promise<TaskStatusResponse> => {
     const response: AxiosResponse<TaskStatusResponse> = await axios.get(
-      `${API_BASE}/api/gan/tasks/${taskId}`
+      `${API_BASE}/api/gan/tasks/${taskId}`,
+      { headers: authHeaders() }
     );
     return response.data;
   },
@@ -358,7 +427,7 @@ export const ganApi = {
   ): Promise<VisualizationSummaryResponse> => {
     const response: AxiosResponse<VisualizationSummaryResponse> = await axios.get(
       `${API_BASE}/api/gan/machines/${machineId}/visualizations/summary`,
-      { params: opts }
+      { params: opts, headers: authHeaders() }
     );
     return response.data;
   },
@@ -368,7 +437,9 @@ export const ganApi = {
    */
   cancelTask: async (taskId: string): Promise<{ success: boolean; task_id: string; message: string }> => {
     const response: AxiosResponse<{ success: boolean; task_id: string; message: string }> = await axios.post(
-      `${API_BASE}/api/gan/tasks/${taskId}/cancel`
+      `${API_BASE}/api/gan/tasks/${taskId}/cancel`,
+      null,
+      { headers: authHeaders() }
     );
     return response.data;
   },
@@ -384,7 +455,8 @@ export const ganApi = {
   ): Promise<GenerationResponse> => {
     const response: AxiosResponse<GenerationResponse> = await axios.post(
       `${API_BASE}/api/gan/machines/${machineId}/generate`,
-      request
+      request,
+      { headers: authHeaders() }
     );
     return response.data;
   },
@@ -394,7 +466,8 @@ export const ganApi = {
    */
   validateDataQuality: async (machineId: string): Promise<any> => {
     const response: AxiosResponse<ValidateDataQualityResponse> = await axios.get(
-      `${API_BASE}/api/gan/machines/${machineId}/validate`
+      `${API_BASE}/api/gan/machines/${machineId}/validate`,
+      { headers: authHeaders() }
     );
     return response.data;
   },
@@ -420,7 +493,8 @@ export const ganApi = {
    */
   getMachines: async (): Promise<MachineListResponse> => {
     const response: AxiosResponse<MachineListResponse> = await axios.get(
-      `${API_BASE}/api/gan/machines`
+      `${API_BASE}/api/gan/machines`,
+      { headers: authHeaders() }
     );
     return response.data;
   },
@@ -430,7 +504,8 @@ export const ganApi = {
    */
   getMachineDetails: async (machineId: string): Promise<MachineDetails> => {
     const response: AxiosResponse<MachineDetails> = await axios.get(
-      `${API_BASE}/api/gan/machines/${machineId}`
+      `${API_BASE}/api/gan/machines/${machineId}`,
+      { headers: authHeaders() }
     );
     return response.data;
   },
@@ -440,7 +515,8 @@ export const ganApi = {
    */
   deleteMachine: async (machineId: string): Promise<{ message: string }> => {
     const response: AxiosResponse<{ message: string }> = await axios.delete(
-      `${API_BASE}/api/gan/machines/${machineId}`
+      `${API_BASE}/api/gan/machines/${machineId}`,
+      { headers: authHeaders() }
     );
     return response.data;
   },
@@ -455,7 +531,7 @@ export const ganApi = {
    */
   healthCheck: async (): Promise<{ status: string; timestamp: string }> => {
     const response: AxiosResponse<{ status: string; timestamp: string }> =
-      await axios.get(`${API_BASE}/api/gan/health`);
+      await axios.get(`${API_BASE}/api/gan/health`, { headers: authHeaders() });
     return response.data;
   },
 };
