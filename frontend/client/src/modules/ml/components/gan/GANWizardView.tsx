@@ -49,9 +49,10 @@ function TabPanel({ children, value, index }: TabPanelProps) {
 interface GANWizardViewProps {
   onBack?: () => void;
   resumeState?: { machine_id: string; current_step: number } | null;
+  userRole?: 'admin' | 'operator' | 'viewer';
 }
 
-export default function GANWizardView({ onBack, resumeState }: GANWizardViewProps) {
+export default function GANWizardView({ onBack, resumeState, userRole }: GANWizardViewProps) {
   const [currentTab, setCurrentTab] = useState(0);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [selectedMachineId, setSelectedMachineId] = useState<string | null>(null);
@@ -181,6 +182,7 @@ export default function GANWizardView({ onBack, resumeState }: GANWizardViewProp
             key={refreshTrigger}
             onMachineSelect={handleMachineSelect}
             onRefresh={() => setRefreshTrigger(prev => prev + 1)}
+            userRole={userRole}
           />
         </TabPanel>
       </Paper>

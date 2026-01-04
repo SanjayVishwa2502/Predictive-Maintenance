@@ -1,0 +1,27 @@
+Jetson Orin Nano → PC “feed only” ideas (keeps PC near-zero compute)
+
+Best for browser live view (lowest PC load): WebRTC from Jetson
+Jetson runs a small WebRTC server (GStreamer/DeepStream pipeline) and your PC browser decodes.
+You get low latency + efficient network usage; PC just renders video.
+Simple + widely compatible: RTSP stream from Jetson
+Jetson publishes rtsp://jetson-ip:8554/stream.
+Your frontend can’t play RTSP directly in most browsers, but you can:
+View via VLC (zero dev work), or
+Convert on Jetson to HLS (.m3u8) for browser playback (conversion happens on Jetson, not your PC).
+Easiest “just show frames”: MJPEG over HTTP
+Jetson serves http://jetson-ip:8080/mjpeg.
+Browser can display it; bandwidth higher than H.264/H.265, but CPU impact on PC is still low.
+Keep inference + metadata on Jetson (recommended)
+Jetson runs VLM inference and exposes lightweight endpoints:
+GET /health
+GET /stream (WebRTC/HLS/MJPEG)
+GET /latest (JSON: labels, bbox, anomaly, timestamps)
+Your PC dashboard only fetches /latest when the VLM page is open (or when user clicks “Start”).
+On-demand “Celery-like” behavior without loading your PC
+Yes: keep a separate backend on the Jetson.
+Your existing PC backend can trigger it only when requested:
+UI → PC backend → Jetson /start_session → Jetson does work → UI consumes feed/results.
+This keeps your PC worker queues untouched and avoids running heavy models locally.
+If you want, I can make the VLM page slightly more useful (still lightweight) by adding a “Test Connection” button that only does a GET {endpoint}/health and shows status (no streaming/inference yet).
+
+GPT-5.2 • 1x

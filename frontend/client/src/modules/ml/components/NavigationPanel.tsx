@@ -32,6 +32,7 @@ import {
   Assessment as AssessmentIcon,
   PlaylistPlay as PlaylistPlayIcon,
   Storage as StorageIcon,
+  Videocam as VideocamIcon,
   Settings as SettingsIcon,
 } from '@mui/icons-material';
 
@@ -57,6 +58,13 @@ const navOptions: NavOption[] = [
     label: 'Predictions',
     icon: <TimelineIcon />,
     description: 'Run ML predictions on machines',
+  },
+  {
+    id: 'vlm',
+    label: 'VLM Integration',
+    icon: <VideocamIcon />,
+    description: 'Connect to Jetson camera feed & results',
+    dividerAfter: true,
   },
   {
     id: 'gan',

@@ -77,6 +77,7 @@ import {
   Menu as MenuIcon,
   History as HistoryIcon,
   Logout as LogoutIcon,
+  HourglassEmpty as HourglassEmptyIcon,
 } from '@mui/icons-material';
 import MachineSelector from '../modules/ml/components/MachineSelector';
 import SensorDashboard from '../modules/ml/components/SensorDashboard';
@@ -93,14 +94,18 @@ import GlobalTaskBanner from '../modules/ml/components/GlobalTaskBanner';
 import ModelTrainingView from '../modules/ml/components/training/ModelTrainingView';
 import ManageModelsView from '../modules/ml/components/models/ManageModelsView';
 import TaskStatusPoller from '../modules/ml/components/TaskStatusPoller';
+import SettingsView from '../modules/ml/components/settings/SettingsView';
 import { DashboardProvider, useDashboard } from '../modules/ml/context/DashboardContext';
 import { ganApi } from '../modules/ml/api/ganApi';
+import VLMIntegrationView from '../modules/vlm/VLMIntegrationView';
 import type { MachineBaselineResponse } from '../modules/ml/types/gan.types';
 import type { SensorReading } from '../modules/ml/components/SensorCharts';
 import type { HistoricalPrediction } from '../modules/ml/components/PredictionHistory';
 import type { PredictionResult as PredictionCardResult } from '../modules/ml/components/PredictionCard';
 import { RoleBadge, clearTokens, getCachedUserInfo, ROLE_CONFIG } from '../App';
 import type { UserInfo, UserRole } from '../App';
+import { useSettings } from '../contexts/SettingsContext';
+import { useNotification } from '../hooks/useNotification';
 
 type SnapshotHistoryRow = HistoricalPrediction;
 
@@ -203,6 +208,13 @@ function MLDashboardPageInner() {
     setConnectionStatus,
   } = useDashboard();
 
+  // Settings context for auto-prediction and LLM configuration
+  const { settings } = useSettings();
+  
+  // Notification hook for alerts
+  const { notifyPredictionComplete, notifyError: _notifyError, notifySuccess: _notifySuccess } = useNotification();
+  // _notifyError and _notifySuccess are available for future use in error handling
+
   // User profile state
   const [currentUser, setCurrentUser] = useState<UserInfo | null>(null);
   const [userMenuAnchor, setUserMenuAnchor] = useState<null | HTMLElement>(null);
@@ -223,6 +235,7 @@ function MLDashboardPageInner() {
   // State management
   const [machines, setMachines] = useState<Machine[]>([]);
   const [sensorData, setSensorData] = useState<Record<string, number> | null>(null);
+  const [dataAgeSeconds, setDataAgeSeconds] = useState<number | null>(null);
   const [sensorHistory, setSensorHistory] = useState<SensorReading[]>([]);
   const [baselineRanges, setBaselineRanges] = useState<BaselineRanges | null>(null);
   const [prediction, setPrediction] = useState<PredictionCardResult | null>(null);
@@ -269,6 +282,7 @@ function MLDashboardPageInner() {
   const machineSwitchLockRunIdRef = useRef<string | null>(null);
   const llmWsRef = useRef<WebSocket | null>(null);
   const llmWsRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const llmWsShouldRunRef = useRef(true);
 
   const [ganResumeState, setGanResumeState] = useState<{ machine_id: string; current_step: number } | null>(null);
 
@@ -334,6 +348,7 @@ function MLDashboardPageInner() {
   useEffect(() => {
     if (!selectedMachineId) {
       setSensorData(null);
+      setDataAgeSeconds(null);
       setSensorHistory([]);
       setPrediction(null);
       setTextOutput('');
@@ -375,8 +390,10 @@ function MLDashboardPageInner() {
   const formatRunDetailsText = (run: any): string => {
     const llm = run?.llm || {};
     const predictions = run?.predictions || {};
+    const sensorDataFromRun = run?.sensor_data || {};
+    const runType = String(run?.run_type || '').trim().toLowerCase();
     const machineLine = `Machine: ${String(run?.machine_id || '')}`;
-    const stampLine = `Data stamp: ${String(run?.data_stamp || '')}`;
+    const stampLine = `Stamp: ${String(run?.data_stamp || '')}`;
 
     const computeHint =
       llm?.combined?.compute ||
@@ -386,11 +403,30 @@ function MLDashboardPageInner() {
       llm?.timeseries?.compute ||
       'unknown';
 
-    const computeLine = `LLM compute: ${String(computeHint)}`;
+    const computeLine = `LLM: ${String(computeHint)}`;
+
+    // Format sensor data from the run (what the LLM used)
+    const sensorLines: string[] = [];
+    if (sensorDataFromRun && typeof sensorDataFromRun === 'object') {
+      const entries = Object.entries(sensorDataFromRun);
+      if (entries.length > 0) {
+        for (const [key, value] of entries) {
+          const numVal = Number(value);
+          if (Number.isFinite(numVal)) {
+            sensorLines.push(`  ${key}: ${numVal.toFixed(1)} C`);
+          }
+        }
+      }
+    }
+    const sensorSection = sensorLines.length > 0
+      ? `Sensors at run time:\n${sensorLines.join('\n')}`
+      : 'Sensors: (no data)';
 
     const combinedText = llm?.combined?.summary
       ? String(llm.combined.summary)
-      : 'LLM: pending or not available';
+      : (runType === 'prediction'
+          ? '[Prediction-only run - click "Prediction" button to generate AI explanation]'
+          : '[AI explanation pending - the LLM is processing or has not been requested yet]');
 
     const combinedTextClean = combinedText
       .replaceAll('Â°C', ' C')
@@ -446,7 +482,7 @@ function MLDashboardPageInner() {
         lines.push(`Anomaly: error: ${String(ano.error)}`);
       } else if (ano) {
         lines.push(
-          `Anomaly: is_anomaly=${String(ano.is_anomaly)} | score=${fmtNum(ano.anomaly_score, 3)} | method=${String(ano.detection_method ?? 'unknown')}`,
+          `Anomaly: is_anomaly=${String(ano.is_anomaly)} | score=${fmtNum(ano.anomaly_score, 4)} | method=${String(ano.detection_method ?? 'unknown')}`,
         );
       }
 
@@ -466,8 +502,9 @@ function MLDashboardPageInner() {
       stampLine,
       machineLine,
       computeLine,
+      sensorSection,
       '',
-      '[LLM]',
+      'Notes',
       combinedTextClean,
       '',
       '[Predictions]',
@@ -485,22 +522,24 @@ function MLDashboardPageInner() {
       if (!resp.ok) return;
       const json = await resp.json();
       const snaps = Array.isArray(json?.snapshots) ? json.snapshots : [];
-      const rows: SnapshotHistoryRow[] = snaps
-        .map((s: any) => {
-          const stamp = String(s?.data_stamp || '').trim();
-          if (!stamp) return null;
-          return {
-            id: stamp,
-            timestamp: new Date(stamp),
-            data_stamp: stamp,
-            run_id: s?.run_id ?? null,
-            has_run: Boolean(s?.run_id),
-            has_explanation: Boolean(s?.has_explanation),
-            run_type: s?.run_type ?? null,  // "prediction" or "explanation"
-            sensor_snapshot: (s?.sensor_data as Record<string, number>) || {},
-          } as SnapshotHistoryRow;
-        })
-        .filter(Boolean) as SnapshotHistoryRow[];
+      const byId = new Map<string, SnapshotHistoryRow>();
+      for (const s of snaps) {
+        const stamp = String(s?.data_stamp || '').trim();
+        if (!stamp) continue;
+        const row: SnapshotHistoryRow = {
+          id: stamp,
+          timestamp: new Date(stamp),
+          data_stamp: stamp,
+          run_id: s?.run_id ?? null,
+          has_run: Boolean(s?.run_id),
+          has_explanation: Boolean(s?.has_explanation),
+          run_type: s?.run_type ?? null, // "prediction" or "explanation"
+          sensor_snapshot: (s?.sensor_data as Record<string, number>) || {},
+        };
+        // Keep the first occurrence (snapshots are newest-first).
+        if (!byId.has(stamp)) byId.set(stamp, row);
+      }
+      const rows = Array.from(byId.values());
 
       setPredictionHistory(rows);
 
@@ -516,10 +555,13 @@ function MLDashboardPageInner() {
     }
   }, [selectedPredictionRunId]);
 
-  const refreshSelectedRunText = useCallback(async (runId: string) => {
-    if (!runId) return;
-    setTextOutputLoading(true);
-    setTextOutputError(null);
+  const refreshSelectedRunText = useCallback(async (runId: string, opts?: { silent?: boolean }): Promise<boolean> => {
+    if (!runId) return false;
+    const silent = Boolean(opts?.silent);
+    if (!silent) {
+      setTextOutputLoading(true);
+      setTextOutputError(null);
+    }
     try {
       const resp = await fetchWithAuth(`${API_BASE_URL}/api/ml/runs/${encodeURIComponent(runId)}`, {
         method: 'GET',
@@ -537,24 +579,37 @@ function MLDashboardPageInner() {
 
       // If this run already has an LLM summary, unlock machine switching.
       const hasSummary = Boolean(json?.llm?.combined?.summary);
+      const runType = String(json?.run_type || '').trim().toLowerCase();
       if (hasSummary && machineSwitchLockRunIdRef.current === runId) {
         setMachineSwitchLockRunId(null);
       }
+
+      // Stop polling when we have a summary OR when this run is prediction-only.
+      return Boolean(hasSummary || runType === 'prediction');
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      setTextOutputError(msg);
+      if (!silent) setTextOutputError(msg);
+      return false;
     } finally {
-      setTextOutputLoading(false);
+      if (!silent) setTextOutputLoading(false);
     }
   }, []);
 
   // LLM push channel (WebSocket) - connect once per browser client
   useEffect(() => {
+    llmWsShouldRunRef.current = true;
     const clientId = getClientId();
     const wsUrl = `${API_BASE_URL}`.replace(/^http/i, 'ws') + `/ws/llm/events?client_id=${encodeURIComponent(clientId)}`;
 
     const connect = () => {
+      if (!llmWsShouldRunRef.current) return;
       try {
+        // Ensure we never keep multiple sockets around.
+        if (llmWsRef.current) {
+          try { llmWsRef.current.close(); } catch { /* ignore */ }
+          llmWsRef.current = null;
+        }
+
         const ws = new WebSocket(wsUrl);
         llmWsRef.current = ws;
 
@@ -587,8 +642,12 @@ function MLDashboardPageInner() {
         };
 
         ws.onclose = () => {
+          if (!llmWsShouldRunRef.current) return;
           if (llmWsRetryTimerRef.current) clearTimeout(llmWsRetryTimerRef.current);
-          llmWsRetryTimerRef.current = setTimeout(connect, 2000);
+          llmWsRetryTimerRef.current = setTimeout(() => {
+            llmWsRetryTimerRef.current = null;
+            connect();
+          }, 2000);
         };
       } catch {
         // ignore
@@ -598,6 +657,7 @@ function MLDashboardPageInner() {
     connect();
 
     return () => {
+      llmWsShouldRunRef.current = false;
       if (llmWsRetryTimerRef.current) clearTimeout(llmWsRetryTimerRef.current);
       if (llmWsRef.current) {
         try { llmWsRef.current.close(); } catch { /* ignore */ }
@@ -613,10 +673,61 @@ function MLDashboardPageInner() {
     void loadSnapshots(selectedMachineId);
   }, [selectedMachineId, loadSnapshots]);
 
-  // When a run is selected, load and format its latest details.
+  // When a run is selected, load its details and (if needed) poll until LLM summary arrives.
+  const llmPollTimerRef = useRef<number | null>(null);
   useEffect(() => {
     if (!selectedPredictionRunId) return;
-    void refreshSelectedRunText(selectedPredictionRunId);
+
+    const runId = selectedPredictionRunId;
+    let cancelled = false;
+
+    // Clear any prior poll.
+    if (llmPollTimerRef.current) {
+      clearInterval(llmPollTimerRef.current);
+      llmPollTimerRef.current = null;
+    }
+
+    const start = async () => {
+      // First fetch (not silent): shows loading if needed.
+      const shouldStop = await refreshSelectedRunText(runId);
+      if (cancelled) return;
+      if (shouldStop) {
+        // Prediction complete - notify user
+        const machine = machines.find(m => m.machine_id === selectedMachineId);
+        notifyPredictionComplete(machine?.display_name || selectedMachineId || 'Machine', 'healthy');
+        return;
+      }
+
+      // Fallback: poll for up to ~3 minutes in case WebSocket push is missed.
+      const deadline = Date.now() + 180_000;
+      llmPollTimerRef.current = window.setInterval(async () => {
+        if (cancelled) return;
+        if (selectedPredictionRunIdRef.current !== runId) return;
+        if (Date.now() > deadline) {
+          if (llmPollTimerRef.current) clearInterval(llmPollTimerRef.current);
+          llmPollTimerRef.current = null;
+          return;
+        }
+        const stop = await refreshSelectedRunText(runId, { silent: true });
+        if (stop) {
+          // Prediction complete - notify user
+          const machine = machines.find(m => m.machine_id === selectedMachineId);
+          notifyPredictionComplete(machine?.display_name || selectedMachineId || 'Machine', 'healthy');
+          if (llmPollTimerRef.current) clearInterval(llmPollTimerRef.current);
+          llmPollTimerRef.current = null;
+        }
+      }, 5000);
+    };
+
+    void start();
+
+    return () => {
+      cancelled = true;
+      if (llmPollTimerRef.current) {
+        clearInterval(llmPollTimerRef.current);
+        llmPollTimerRef.current = null;
+      }
+    };
   }, [selectedPredictionRunId, refreshSelectedRunText]);
 
   // Day 19.2: Fetch sensor data with real API call and retry logic
@@ -657,6 +768,12 @@ function MLDashboardPageInner() {
       
       // Optimistic UI update
       setSensorData(newData);
+      // Track data age from backend (how old the sensor reading is)
+      setDataAgeSeconds(typeof data.data_age_seconds === 'number' ? data.data_age_seconds : null);
+      // Track if LLM is currently generating for this machine
+      if (typeof data.llm_busy === 'boolean') {
+        setTextOutputLoading(data.llm_busy);
+      }
       setIsOnline(true);
       setIsConnected(true);
       setConnectionStatus('connected');
@@ -676,16 +793,16 @@ function MLDashboardPageInner() {
       // Persisted 5-second snapshot rows for the bottom history.
       const stamp = String(data.data_stamp || data.last_update || '').trim();
       if (stamp) {
-        // Check if auto-prediction ran for this data point
-        const autoPred = data.auto_prediction as { run_id?: string; run_type?: string } | undefined;
+        const runIdFromStatus = String(data.run_id || '').trim();
+        const runTypeFromStatus = (data.run_type as ('prediction' | 'explanation' | undefined)) ?? undefined;
         const row: SnapshotHistoryRow = {
           id: stamp,
           timestamp: new Date(stamp),
           data_stamp: stamp,
-          run_id: autoPred?.run_id ?? data.run_id ?? null,
-          has_run: Boolean(autoPred?.run_id || data.run_id),
-          has_explanation: false,  // Auto predictions don't have LLM explanations
-          run_type: autoPred?.run_type as 'prediction' | 'explanation' | undefined ?? null,
+          run_id: runIdFromStatus || null,
+          has_run: Boolean(runIdFromStatus),
+          has_explanation: Boolean(data.has_explanation),
+          run_type: runTypeFromStatus ?? null,
           sensor_snapshot: newData,
         };
         setPredictionHistory((prev) => {
@@ -886,6 +1003,7 @@ function MLDashboardPageInner() {
   const getViewTitle = (view: typeof selectedView) => {
     switch (view) {
       case 'predictions': return 'Predictions';
+      case 'vlm': return 'VLM Integration';
       case 'gan': return 'New Machine Wizard';
       case 'training': return 'Model Training';
       case 'models': return 'Manage Models';
@@ -1120,6 +1238,28 @@ function MLDashboardPageInner() {
         {/* Phase 3.7.6.6: Persistent task banner across all views */}
         <GlobalTaskBanner onViewTasks={() => setSelectedView('tasks')} />
 
+        {/* Pending approval alert for operators awaiting approval */}
+        {currentUser && currentUser.role === 'operator' && currentUser.is_approved === false && (
+          <Alert
+            severity="warning"
+            icon={<HourglassEmptyIcon />}
+            sx={{
+              mb: 2,
+              background: 'rgba(245, 158, 11, 0.15)',
+              border: '1px solid rgba(245, 158, 11, 0.4)',
+              '& .MuiAlert-message': { width: '100%' },
+            }}
+          >
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              Account Pending Approval
+            </Typography>
+            <Typography variant="body2" sx={{ mt: 0.5 }}>
+              Your operator account is awaiting administrator approval. You will have full access once an admin approves your registration.
+              Currently, you have read-only access similar to a viewer.
+            </Typography>
+          </Alert>
+        )}
+
         {selectedView === 'predictions' && (
           <Container maxWidth="xl">
             {/* Page Header */}
@@ -1185,6 +1325,7 @@ function MLDashboardPageInner() {
                   loading={!sensorData}
                   connected={isConnected}
                   error={error}
+                  dataAgeSeconds={dataAgeSeconds}
                 />
 
                 {/* Prediction Card (contents now show text output) */}
@@ -1194,9 +1335,13 @@ function MLDashboardPageInner() {
                   loading={loading}
                   onRunPrediction={handleRunPrediction}
                   onExplain={() => setShowExplanation(true)}
+                  userRole={currentUser?.role as 'admin' | 'operator' | 'viewer' | undefined}
+                  isApproved={currentUser?.is_approved ?? true}
                   textOutput={textOutput}
                   textOutputLoading={textOutputLoading}
                   textOutputError={textOutputError}
+                  autoRefresh={settings.autoPredictionEnabled}
+                  refreshInterval={settings.autoPredictionInterval}
                 />
 
                 {/* Sensor Trend Charts */}
@@ -1221,6 +1366,13 @@ function MLDashboardPageInner() {
                     if (!p.run_id) return;
                     setSelectedPredictionRunId(String(p.run_id));
                   }}
+                  onHistoryCleared={() => {
+                    setPredictionHistory([]);
+                    setSelectedPredictionRunId(null);
+                    setTextOutput('');
+                    setTextOutputError(null);
+                  }}
+                  userRole={currentUser?.role as 'admin' | 'operator' | 'viewer' | undefined}
                 />
               </>
             ) : (
@@ -1255,6 +1407,7 @@ function MLDashboardPageInner() {
                 onClose={() => setShowExplanation(false)}
                 machineId={selectedMachineId!}
                 predictionData={{
+                  run_id: selectedPredictionRunId || undefined,
                   health_state: getHealthStateFromProbability(prediction.classification.failure_probability),
                   confidence: prediction.classification.confidence,
                   failure_probability: prediction.classification.failure_probability,
@@ -1268,9 +1421,19 @@ function MLDashboardPageInner() {
         )}
 
         {/* Phase 3.7.6.2: GAN Wizard View */}
+        {selectedView === 'vlm' && (
+          <Container maxWidth="xl">
+            <VLMIntegrationView />
+          </Container>
+        )}
+
         {selectedView === 'gan' && (
           <Container maxWidth="xl">
-            <GANWizardView onBack={() => setSelectedView('predictions')} resumeState={ganResumeState} />
+            <GANWizardView 
+              onBack={() => setSelectedView('predictions')} 
+              resumeState={ganResumeState}
+              userRole={currentUser?.role as 'admin' | 'operator' | 'viewer' | undefined}
+            />
           </Container>
         )}
 
@@ -1278,7 +1441,9 @@ function MLDashboardPageInner() {
         {selectedView === 'training' && <ModelTrainingView />}
 
         {/* Phase 3.7.8.5: Manage Models View */}
-        {selectedView === 'models' && <ManageModelsView />}
+        {selectedView === 'models' && (
+          <ManageModelsView userRole={currentUser?.role as 'admin' | 'operator' | 'viewer' | undefined} />
+        )}
 
         {/* Phase 3.7.6.1: History View (Stub) */}
         {selectedView === 'history' && (
@@ -1335,30 +1500,14 @@ function MLDashboardPageInner() {
         {/* Phase 3.7.6.1: Dataset Manager View (Stub) */}
         {selectedView === 'datasets' && (
           <Container maxWidth="xl">
-            <DatasetDownloadsView />
+            <DatasetDownloadsView userRole={currentUser?.role as 'admin' | 'operator' | 'viewer' | undefined} />
           </Container>
         )}
 
-        {/* Phase 3.7.6.1: Settings View (Stub) */}
+        {/* Phase 3.7.6.1: Settings View */}
         {selectedView === 'settings' && (
           <Container maxWidth="xl">
-            <Paper
-              elevation={3}
-              sx={{
-                p: 8,
-                textAlign: 'center',
-                background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.8) 0%, rgba(17, 24, 39, 0.8) 100%)',
-                backdropFilter: 'blur(10px)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-              }}
-            >
-              <Typography variant="h4" sx={{ color: '#9ca3af', mb: 2, fontWeight: 600 }}>
-                Settings
-              </Typography>
-              <Typography variant="body1" sx={{ color: '#6b7280' }}>
-                Dashboard configuration and preferences coming soon
-              </Typography>
-            </Paper>
+            <SettingsView userRole={currentUser?.role as 'admin' | 'operator' | 'viewer' | undefined} />
           </Container>
         )}
 

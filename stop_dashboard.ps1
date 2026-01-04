@@ -28,7 +28,6 @@ Write-ColorOutput "[SHUTDOWN] Stopping services by port..." "Yellow"
 
 $ports = @(
     @{Port=8000; Name="Backend (FastAPI)"},
-    @{Port=5555; Name="Flower Monitor"},
     @{Port=5173; Name="Frontend (Vite)"}
 )
 
@@ -93,7 +92,7 @@ if ($nodeProcesses) {
     $stoppedCount += $nodeCount
 }
 
-# Kill remaining Python processes (Backend, Celery, Flower)
+# Kill remaining Python processes (Backend, Celery)
 $pythonProcesses = Get-Process -Name "python" -ErrorAction SilentlyContinue
 if ($pythonProcesses) {
     # Filter to only kill processes in project directory
@@ -109,7 +108,7 @@ if ($pythonProcesses) {
 }
 
 # Additional specific process cleanup
-$cleanupProcesses = @("uvicorn", "celery", "flower")
+$cleanupProcesses = @("uvicorn", "celery")
 foreach ($procName in $cleanupProcesses) {
     $proc = Get-Process -Name $procName -ErrorAction SilentlyContinue
     if ($proc) {
@@ -166,7 +165,7 @@ if ($allClear) {
     Write-ColorOutput "========================================" "Yellow"
     Write-ColorOutput ""
     Write-ColorOutput "  Try running this script again or manually:" "Gray"
-    Write-ColorOutput "  Get-NetTCPConnection -LocalPort 8000,5555,5173 | Select OwningProcess | Stop-Process -Force" "Gray"
+    Write-ColorOutput "  Get-NetTCPConnection -LocalPort 8000,5173 | Select OwningProcess | Stop-Process -Force" "Gray"
 }
 
 Write-ColorOutput ""

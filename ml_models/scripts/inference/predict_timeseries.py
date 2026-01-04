@@ -45,7 +45,12 @@ class TimeSeriesPredictor:
         self.models_dir = models_dir or PROJECT_ROOT / "ml_models" / "models" / "timeseries"
         self.model_path = self.models_dir / machine_id
         self.model = None
-        self.prediction_length = 24  # 24 hours ahead
+        # Default: 24 hours ahead, hourly steps.
+        # Some machines (e.g. printers) operate at sub-hourly cadence. We load
+        # optional metadata.json to set an appropriate frequency.
+        self.prediction_length = 24
+        self.freq = 'H'
+        self.steps_per_hour = 1
         
         self._load_model()
     
@@ -64,6 +69,21 @@ class TimeSeriesPredictor:
             
             print(f"Loading time-series forecasting model for {self.machine_id}...")
             self.model = joblib.load(prophet_models_path)
+
+            # Load optional metadata (freq/steps_per_hour) to support sub-hourly forecasts.
+            metadata_path = self.model_path / "metadata.json"
+            if metadata_path.exists():
+                try:
+                    with open(metadata_path, 'r', encoding='utf-8') as f:
+                        meta = json.load(f)
+                    freq = str(meta.get('freq') or '').strip()
+                    if freq:
+                        self.freq = freq
+                    sph = meta.get('steps_per_hour')
+                    if isinstance(sph, int) and sph > 0:
+                        self.steps_per_hour = sph
+                except Exception:
+                    pass
             
             print(f"[OK] Model loaded successfully")
             if isinstance(self.model, dict):
@@ -92,8 +112,23 @@ class TimeSeriesPredictor:
             # Ensure timestamp is datetime
             if 'timestamp' not in historical_data.columns:
                 raise ValueError("historical_data must have 'timestamp' column")
-            
-            historical_data['timestamp'] = pd.to_datetime(historical_data['timestamp'])
+
+            # Normalize timestamps and sort so we can anchor the forecast to the
+            # latest observed reading rather than the model's original training window.
+            historical_data = historical_data.copy()
+            historical_data['timestamp'] = pd.to_datetime(historical_data['timestamp'], errors='coerce', utc=True)
+            historical_data = historical_data.dropna(subset=['timestamp']).sort_values('timestamp').reset_index(drop=True)
+            if historical_data.empty:
+                raise ValueError("historical_data has no valid timestamps")
+
+            # Interpret forecast_steps as forecast hours for API stability.
+            forecast_hours = int(forecast_steps or 24)
+            steps = max(1, int(forecast_hours * (self.steps_per_hour or 1)))
+
+            last_ts_utc = historical_data['timestamp'].iloc[-1]
+            # Prophet expects naive datetimes. We'll treat them as UTC.
+            last_ts = last_ts_utc.tz_convert('UTC').tz_localize(None)
+            future_ds = pd.date_range(start=last_ts, periods=steps + 1, freq=self.freq)[1:]
             
             # Models are dict with one Prophet model per sensor
             forecasts = {}
@@ -108,31 +143,69 @@ class TimeSeriesPredictor:
                 sensor_cols.append(sensor_name)
                 
                 try:
-                    # Prophet models are already fitted - just create future and predict
-                    # Create future dataframe (Prophet will extend from last training date)
-                    future = prophet_model.make_future_dataframe(periods=forecast_steps, freq='H')
-                    
-                    # Generate forecast using pre-fitted model
-                    forecast = prophet_model.predict(future)
-                    
-                    # Extract forecast for future periods only
-                    forecast_values = forecast.tail(forecast_steps)
+                    # Forecast relative to the latest observed timestamp (input-driven),
+                    # not relative to when the model was originally trained.
+                    ds_all = pd.DatetimeIndex([last_ts]).append(future_ds)
+                    forecast = prophet_model.predict(pd.DataFrame({'ds': ds_all}))
+
+                    # Prophet includes the anchor point; keep future rows only.
+                    forecast_values = forecast.iloc[1:].copy()
+
+                    # Light-weight anchoring: shift the forecast so the first point
+                    # aligns with the latest observed value. This improves accuracy
+                    # under level shifts without an expensive refit.
+                    last_val = historical_data[sensor_name].iloc[-1]
+                    try:
+                        if pd.notna(last_val) and pd.notna(forecast.iloc[0].get('yhat', np.nan)):
+                            offset = float(last_val) - float(forecast.iloc[0]['yhat'])
+                            for col in ('yhat', 'yhat_lower', 'yhat_upper'):
+                                if col in forecast_values.columns and forecast_values[col].notna().any():
+                                    forecast_values[col] = forecast_values[col].astype(float) + offset
+                    except Exception:
+                        # If anchoring fails for any reason, keep the raw forecast.
+                        pass
+
+                    # Robust sanity clamp: keep forecasts within a plausible range
+                    # derived from recent historical values for this sensor.
+                    try:
+                        hist_vals = pd.to_numeric(historical_data[sensor_name], errors='coerce').dropna().astype(float)
+                        hist_tail = hist_vals.tail(500)
+                        if not hist_tail.empty:
+                            q01, q99 = hist_tail.quantile([0.01, 0.99]).tolist()
+                            span = float(q99 - q01)
+                            # Allow a modest margin beyond recent extremes.
+                            margin = max(5.0, span * 0.2) if span > 0 else 10.0
+                            lower = float(q01 - margin)
+                            upper = float(q99 + margin)
+                            # Temperatures should not go wildly negative; bound to 0 where applicable.
+                            if 'temp' in str(sensor_name).lower():
+                                lower = max(0.0, lower)
+
+                            for col in ('yhat', 'yhat_lower', 'yhat_upper'):
+                                if col in forecast_values.columns:
+                                    s = pd.to_numeric(forecast_values[col], errors='coerce')
+                                    # Replace non-finite with the last observed value before clamping.
+                                    s = s.where(np.isfinite(s), float(hist_tail.iloc[-1]))
+                                    forecast_values[col] = s.astype(float).clip(lower=lower, upper=upper)
+                    except Exception:
+                        # If sanitization fails, keep the forecast as-is.
+                        pass
                     
                     # Store forecasts with confidence intervals
                     forecasts[sensor_name] = {
                         'yhat': forecast_values['yhat'].tolist(),
                         'yhat_lower': forecast_values['yhat_lower'].tolist(),
                         'yhat_upper': forecast_values['yhat_upper'].tolist(),
-                        'ds': forecast_values['ds'].dt.strftime('%Y-%m-%dT%H:%M:%SZ').tolist()
+                        'ds': pd.to_datetime(forecast_values['ds'], utc=True).dt.strftime('%Y-%m-%dT%H:%M:%SZ').tolist()
                     }
                     
                 except Exception as e:
                     print(f"⚠️  Forecast failed for {sensor_name}: {e}")
                     # Add empty forecast to maintain structure
                     forecasts[sensor_name] = {
-                        'yhat': [None] * forecast_steps,
-                        'yhat_lower': [None] * forecast_steps,
-                        'yhat_upper': [None] * forecast_steps,
+                        'yhat': [None] * steps,
+                        'yhat_lower': [None] * steps,
+                        'yhat_upper': [None] * steps,
                         'ds': []
                     }
             
@@ -151,8 +224,9 @@ class TimeSeriesPredictor:
             
             # Get current time
             current_time = datetime.utcnow()
-            forecast_start = current_time + timedelta(hours=1)
-            forecast_end = forecast_start + timedelta(hours=forecast_steps)
+            # Align the forecast window to the latest observed timestamp.
+            forecast_start = (last_ts_utc.to_pydatetime() + timedelta(hours=1))
+            forecast_end = (last_ts_utc.to_pydatetime() + timedelta(hours=forecast_hours))
             
             # Construct result
             result = {
@@ -358,6 +432,7 @@ class TimeSeriesPredictor:
         summary_parts = []
         
         # Divide forecast into time windows (0-6h, 6-12h, 12-18h, 18-24h)
+        sph = int(self.steps_per_hour or 1)
         windows = [
             (0, 6, "Hour 0-6"),
             (6, 12, "Hour 6-12"),
@@ -366,6 +441,8 @@ class TimeSeriesPredictor:
         ]
         
         for start, end, label in windows:
+            start_i = start * sph
+            end_i = end * sph
             temp_cols = [col for col in sensor_cols if 'temp' in col.lower()]
             vib_cols = [col for col in sensor_cols if 'velocity' in col.lower() or 'vibration' in col.lower()]
             
@@ -375,14 +452,14 @@ class TimeSeriesPredictor:
             
             for col in temp_cols:
                 if col in forecasts and forecasts[col]['yhat']:
-                    window_vals = forecasts[col]['yhat'][start:end]
+                    window_vals = forecasts[col]['yhat'][start_i:end_i]
                     if window_vals and all(v is not None for v in window_vals):
                         temp_values.extend(window_vals)
                         per_temp_means[col] = float(np.mean(window_vals))
             
             for col in vib_cols:
                 if col in forecasts and forecasts[col]['yhat']:
-                    window_vals = forecasts[col]['yhat'][start:end]
+                    window_vals = forecasts[col]['yhat'][start_i:end_i]
                     if window_vals and all(v is not None for v in window_vals):
                         vib_values.extend(window_vals)
             
@@ -460,6 +537,7 @@ class TimeSeriesPredictor:
             Maintenance window recommendation
         """
         # Find time period with lowest sensor values (best for maintenance)
+        sph = int(self.steps_per_hour or 1)
         windows = [(0, 6), (6, 12), (12, 18), (18, 24)]
         window_scores = []
         
@@ -467,7 +545,7 @@ class TimeSeriesPredictor:
             score = 0
             for col in sensor_cols:
                 if col in forecasts and forecasts[col]['yhat']:
-                    window_vals = forecasts[col]['yhat'][start:end]
+                    window_vals = forecasts[col]['yhat'][start * sph:end * sph]
                     valid_vals = [v for v in window_vals if v is not None]
                     
                     if valid_vals:

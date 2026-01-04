@@ -16,6 +16,7 @@ import pandas as pd
 from pathlib import Path
 import sys
 import os
+from datetime import datetime, timedelta
 
 # Add CUDA DLLs to PATH for llama-cpp-python (Fix for missing DLLs on Windows)
 # This ensures the GPU is used instead of the CPU
@@ -63,16 +64,20 @@ class IntegratedPredictionSystem:
     Returns predictions with human-readable explanations for technicians.
     """
     
-    def __init__(self):
-        """Initialize explainer and model cache"""
+    def __init__(self, load_llm: bool = True):
+        """Initialize model cache, optionally loading the LLM/RAG explainer."""
         print("\n" + "="*70)
         print("Initializing IntegratedPredictionSystem")
         print("="*70)
-        
-        print("\n[1/2] Loading MLExplainer (LLM + RAG)...")
-        self.explainer = MLExplainer()
-        
-        print("[2/2] Preparing model cache...")
+
+        self.explainer = None
+        if load_llm:
+            print("\n[1/2] Loading MLExplainer (LLM + RAG)...")
+            self.explainer = MLExplainer()
+            print("[2/2] Preparing model cache...")
+        else:
+            print("\n[1/2] Skipping MLExplainer (LLM + RAG)")
+            print("[2/2] Preparing model cache...")
         # Cache for loaded models (lazy loading)
         self.models = {
             'classification': {},  # Will load on demand
@@ -406,9 +411,62 @@ class IntegratedPredictionSystem:
             import time
             df['timestamp'] = time.time()
             
-        # Convert timestamp to datetime if it's numeric
+        # Convert timestamp to timezone-aware UTC datetime.
+        # Pandas can otherwise infer a strict format from early rows and fail
+        # later when fractional seconds appear (e.g. ...Z vs ... .ffffffZ).
         if pd.api.types.is_numeric_dtype(df['timestamp']):
-            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s', utc=True, errors='coerce')
+        else:
+            raw_ts = df['timestamp']
+            raw_ts_str = raw_ts.astype(str)
+
+            parsed = None
+            try:
+                parsed = pd.to_datetime(raw_ts_str, utc=True, errors='coerce', format='ISO8601')
+            except (TypeError, ValueError):
+                parsed = pd.to_datetime(raw_ts_str, utc=True, errors='coerce')
+
+            if parsed.isna().any():
+                # Fallback: normalize trailing Z to an explicit offset.
+                normalized = raw_ts_str.str.replace('Z', '+00:00', regex=False)
+                fallback = pd.to_datetime(normalized, utc=True, errors='coerce')
+                parsed = parsed.fillna(fallback)
+
+            invalid_mask = parsed.isna() & raw_ts.notna() & (raw_ts_str.str.strip() != '')
+            if invalid_mask.any():
+                bad_examples = raw_ts_str[invalid_mask].head(5).tolist()
+                raise ValueError(
+                    "Invalid timestamp(s) for forecast input. Expected ISO8601 (e.g. "
+                    "'2026-01-03T06:37:02Z' or '2026-01-03T06:37:02.239819Z') or Unix seconds. "
+                    f"Examples: {bad_examples}"
+                )
+
+            df['timestamp'] = parsed
+
+        # Shift timestamps if data is old (Simulation Mode)
+        # If the last data point is older than 1 hour, shift the entire series
+        # so the last point aligns with the current time.
+        if not df.empty:
+            last_ts = df['timestamp'].max()
+            if pd.isna(last_ts):
+                # Nothing valid to align; skip shifting.
+                last_ts = None
+            
+            # Handle timezone awareness
+            if last_ts is None:
+                now = None
+            elif last_ts.tzinfo is None:
+                # If naive, assume UTC (standard for unix timestamps)
+                # Use utcnow() to compare
+                now = datetime.utcnow()
+            else:
+                # If aware, use aware now
+                now = datetime.now(last_ts.tzinfo)
+            
+            # If data is older than 1 hour (3600 seconds)
+            if now is not None and (now - last_ts).total_seconds() > 3600:
+                delta = now - last_ts
+                df['timestamp'] = df['timestamp'] + delta
             
         # Run prediction
         predictor = self.models['timeseries'][machine_id]

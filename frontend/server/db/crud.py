@@ -339,6 +339,7 @@ def create_user(
     email: str,
     hashed_password: str,
     role: str = "viewer",
+    is_approved: bool = True,
 ) -> models.User:
     """Create a new user."""
     db_user = models.User(
@@ -346,6 +347,7 @@ def create_user(
         email=email,
         hashed_password=hashed_password,
         role=role,
+        is_approved=is_approved,
     )
     db.add(db_user)
     db.commit()
@@ -371,6 +373,34 @@ def get_user_by_id(db: Session, user_id: uuid.UUID) -> Optional[models.User]:
 def get_users(db: Session, skip: int = 0, limit: int = 100) -> List[models.User]:
     """Get all users with pagination."""
     return db.query(models.User).offset(skip).limit(limit).all()
+
+
+def get_pending_users(db: Session, skip: int = 0, limit: int = 100) -> List[models.User]:
+    """Get all users pending approval."""
+    return db.query(models.User).filter(
+        models.User.is_approved == False,
+        models.User.is_active == True,
+    ).offset(skip).limit(limit).all()
+
+
+def approve_user(db: Session, user_id: uuid.UUID) -> Optional[models.User]:
+    """Approve a pending user."""
+    user = get_user_by_id(db, user_id)
+    if user:
+        user.is_approved = True
+        db.commit()
+        db.refresh(user)
+    return user
+
+
+def reject_user(db: Session, user_id: uuid.UUID) -> bool:
+    """Reject and delete a pending user."""
+    user = get_user_by_id(db, user_id)
+    if user and not user.is_approved:
+        db.delete(user)
+        db.commit()
+        return True
+    return False
 
 
 def authenticate_user(db: Session, username: str, password: str) -> Optional[models.User]:

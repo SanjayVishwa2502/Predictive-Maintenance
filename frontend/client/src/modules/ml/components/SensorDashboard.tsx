@@ -40,6 +40,8 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import CircleIcon from '@mui/icons-material/Circle';
 import SignalWifiOffIcon from '@mui/icons-material/SignalWifiOff';
 
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+
 // ============================================================
 // TypeScript Interfaces
 // ============================================================
@@ -62,6 +64,8 @@ export interface SensorDashboardProps {
   loading?: boolean;
   connected?: boolean;
   error?: string | null;
+  /** Data age in seconds from the backend (how old the sensor reading is) */
+  dataAgeSeconds?: number | null;
 }
 
 interface SensorCardProps {
@@ -376,7 +380,12 @@ const SensorDashboard: React.FC<SensorDashboardProps> = ({
   loading = false,
   connected = false,
   error = null,
+  dataAgeSeconds = null,
 }) => {
+  // Stale data threshold (60 seconds = 1 minute without new data from logger)
+  const STALE_THRESHOLD_SECONDS = 60;
+  const isStale = dataAgeSeconds !== null && dataAgeSeconds > STALE_THRESHOLD_SECONDS;
+
   // Calculate time since last update
   const timeSinceUpdate = useMemo(() => {
     if (!lastUpdated) return 'Never';
@@ -473,27 +482,53 @@ const SensorDashboard: React.FC<SensorDashboardProps> = ({
         </Box>
 
         <Stack direction="row" spacing={2} alignItems="center">
-          {/* Live Indicator */}
-          <Tooltip title={connected ? 'Backend connected' : 'Disconnected'}>
+          {/* Live/Stale/Offline Indicator */}
+          <Tooltip 
+            title={
+              !connected 
+                ? 'Disconnected from backend' 
+                : isStale 
+                  ? `Data is ${Math.round(dataAgeSeconds || 0)}s old - Logger may have stopped`
+                  : 'Backend connected, data is fresh'
+            }
+          >
             <Chip
               icon={
-                <CircleIcon
-                  sx={{
-                    fontSize: 12,
-                    animation: connected ? 'pulse 2s infinite' : 'none',
-                    '@keyframes pulse': {
-                      '0%, 100%': { opacity: 1 },
-                      '50%': { opacity: 0.5 },
-                    },
-                  }}
-                />
+                !connected ? (
+                  <SignalWifiOffIcon sx={{ fontSize: 14 }} />
+                ) : isStale ? (
+                  <WarningAmberIcon sx={{ fontSize: 14 }} />
+                ) : (
+                  <CircleIcon
+                    sx={{
+                      fontSize: 12,
+                      animation: 'pulse 2s infinite',
+                      '@keyframes pulse': {
+                        '0%, 100%': { opacity: 1 },
+                        '50%': { opacity: 0.5 },
+                      },
+                    }}
+                  />
+                )
               }
-              label={connected ? 'Live' : 'Offline'}
+              label={!connected ? 'Offline' : isStale ? 'Stale' : 'Live'}
               size="small"
               sx={{
-                backgroundColor: connected ? 'rgba(16, 185, 129, 0.15)' : 'rgba(100, 116, 139, 0.15)',
-                color: connected ? '#10b981' : '#64748b',
-                borderColor: connected ? 'rgba(16, 185, 129, 0.3)' : 'rgba(100, 116, 139, 0.3)',
+                backgroundColor: !connected 
+                  ? 'rgba(100, 116, 139, 0.15)' 
+                  : isStale 
+                    ? 'rgba(251, 191, 36, 0.15)' 
+                    : 'rgba(16, 185, 129, 0.15)',
+                color: !connected 
+                  ? '#64748b' 
+                  : isStale 
+                    ? '#fbbf24' 
+                    : '#10b981',
+                borderColor: !connected 
+                  ? 'rgba(100, 116, 139, 0.3)' 
+                  : isStale 
+                    ? 'rgba(251, 191, 36, 0.3)' 
+                    : 'rgba(16, 185, 129, 0.3)',
                 border: '1px solid',
                 fontWeight: 600,
                 fontSize: '0.75rem',
@@ -501,9 +536,18 @@ const SensorDashboard: React.FC<SensorDashboardProps> = ({
             />
           </Tooltip>
 
-          {/* Last Updated */}
-          <Typography variant="caption" sx={{ color: 'text.disabled', fontSize: '0.75rem' }}>
-            Updated: {timeSinceUpdate}
+          {/* Last Updated / Data Age */}
+          <Typography 
+            variant="caption" 
+            sx={{ 
+              color: isStale ? '#fbbf24' : 'text.disabled', 
+              fontSize: '0.75rem',
+              fontWeight: isStale ? 600 : 400,
+            }}
+          >
+            {isStale && dataAgeSeconds !== null
+              ? `Data: ${Math.round(dataAgeSeconds)}s old`
+              : `Updated: ${timeSinceUpdate}`}
           </Typography>
         </Stack>
       </Stack>

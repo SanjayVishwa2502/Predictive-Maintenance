@@ -104,7 +104,7 @@ Write-ColorOutput ""
 # ============================================================================
 Write-ColorOutput "[CLEANUP] Checking for existing processes..." "Yellow"
 
-$ports = @(8000, 5555, 5173)
+$ports = @(8000, 5173)
 $killed = 0
 foreach ($port in $ports) {
     $process = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue | 
@@ -176,7 +176,7 @@ Write-ColorOutput "     Log: $loggerLog" "Gray"
 
 # 2. Celery Worker - System PowerShell Window
 # Default worker handles GAN/ML and lightweight tasks.
-Write-ColorOutput "[2/5] Starting Celery Worker (default)..." "Yellow"
+Write-ColorOutput "[2/4] Starting Celery Worker (default)..." "Yellow"
 $celeryLog = "$LogDir\celery_$Timestamp.log"
 $celeryPurgeCmd = ""
 if ($PurgeCeleryOnStart) {
@@ -190,21 +190,21 @@ Write-ColorOutput "     Log: $celeryLog" "Gray"
 
 # 3. Celery Worker (LLM) - System PowerShell Window
 # Dedicated queue for long CPU inference to avoid blocking other tasks.
-Write-ColorOutput "[3/5] Starting Celery Worker (LLM queue)..." "Yellow"
+Write-ColorOutput "[3/4] Starting Celery Worker (LLM queue)..." "Yellow"
 $celeryLlmLog = "$LogDir\celery_llm_$Timestamp.log"
-$celeryLlmCmd = "cd '$ProjectRoot\frontend\server'; & '$ProjectRoot\venv\Scripts\Activate.ps1'; Write-Host '=== CELERY WORKER (llm) ===' -ForegroundColor Yellow; celery -A celery_app worker --loglevel=info --pool=solo -Q llm 2>&1 | Tee-Object -FilePath '$celeryLlmLog'"
+$celeryLlmCmd = "cd '$ProjectRoot\frontend\server'; & '$ProjectRoot\venv\Scripts\Activate.ps1'; " +
+    "Write-Host '=== CELERY WORKER (llm) ===' -ForegroundColor Yellow; " +
+    "while (`$true) { " +
+    "  Write-Host ('[LLM] Starting worker at ' + (Get-Date)) -ForegroundColor Yellow; " +
+    "  celery -A celery_app worker --loglevel=info --pool=solo --concurrency=1 -Q llm 2>&1 | Tee-Object -FilePath '$celeryLlmLog' -Append; " +
+    "  Write-Host ('[LLM] Worker exited at ' + (Get-Date) + ' (restarting in 5s)') -ForegroundColor Red; " +
+    "  Start-Sleep -Seconds 5; " +
+    "}"
 Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoExit", "-Command", $celeryLlmCmd
 Write-ColorOutput "     Log: $celeryLlmLog" "Gray"
 
-# 4. Flower (Celery Monitoring) - System PowerShell Window
-Write-ColorOutput "[4/5] Starting Flower (Celery Monitoring)..." "Magenta"
-$flowerLog = "$LogDir\flower_$Timestamp.log"
-$flowerCmd = "cd '$ProjectRoot\frontend\server'; & '$ProjectRoot\venv\Scripts\Activate.ps1'; Write-Host '=== FLOWER MONITORING (Port 5555) ===' -ForegroundColor Magenta; celery -A celery_app flower --port=5555 2>&1 | Tee-Object -FilePath '$flowerLog'"
-Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoExit", "-Command", $flowerCmd
-Write-ColorOutput "     Log: $flowerLog" "Gray"
-
-# 5. Frontend (Vite) - System PowerShell Window
-Write-ColorOutput "[5/5] Starting Frontend Server (React)..." "Cyan"
+# 4. Frontend (Vite) - System PowerShell Window
+Write-ColorOutput "[4/4] Starting Frontend Server (React)..." "Cyan"
 $frontendLog = "$LogDir\frontend_$Timestamp.log"
 $frontendCmd = "cd '$ProjectRoot\frontend\client'; Write-Host '=== FRONTEND SERVER (Port 5173) ===' -ForegroundColor Cyan; npm run dev 2>&1 | Tee-Object -FilePath '$frontendLog'"
 Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList "-NoExit", "-Command", $frontendCmd
@@ -228,7 +228,6 @@ Write-ColorOutput "[HEALTH] Verifying services..." "Cyan"
 
 $services = @(
     @{Name="Backend API"; Port=8000; Wait=15},
-    @{Name="Flower"; Port=5555; Wait=10},
     @{Name="Frontend"; Port=5173; Wait=15}
 )
 
@@ -258,7 +257,6 @@ Write-ColorOutput "[SERVICE URLS]" "White"
 Write-ColorOutput "  Backend API:     http://localhost:8000" "Cyan"
 Write-ColorOutput "  API Docs:        http://localhost:8000/docs" "Cyan"
 Write-ColorOutput "  Frontend:        http://localhost:5173" "Cyan"
-Write-ColorOutput "  Flower Monitor:  http://localhost:5555" "Magenta"
 
 Write-ColorOutput ""
 Write-ColorOutput "[LOGS] Saved to: $LogDir" "Gray"
@@ -267,7 +265,7 @@ Write-ColorOutput ""
 Write-ColorOutput "[COMMANDS] Management:" "Yellow"
 Write-ColorOutput "  Stop services:   .\stop_dashboard.ps1" "Gray"
 Write-ColorOutput "  View logs:       Get-Content `"$LogDir\*_$Timestamp.log`" -Tail 50 -Wait" "Gray"
-Write-ColorOutput "  Check status:    Get-NetTCPConnection -LocalPort 8000,5555,5173" "Gray"
+Write-ColorOutput "  Check status:    Get-NetTCPConnection -LocalPort 8000,5173" "Gray"
 
 Write-ColorOutput ""
 Write-ColorOutput "[BROWSER] Opening frontend..." "Cyan"

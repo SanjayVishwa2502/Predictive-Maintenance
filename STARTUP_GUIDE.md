@@ -15,7 +15,7 @@ Or from PowerShell terminal:
 
 ## What Gets Started
 
-The startup script launches **4 PowerShell windows**, each running a different service:
+The startup script launches separate PowerShell windows for each service:
 
 ### 1. Backend Server (FastAPI) 🔧
 - **URL:** http://localhost:8000
@@ -28,13 +28,7 @@ The startup script launches **4 PowerShell windows**, each running a different s
 - **Pool:** Solo (Windows compatible)
 - **Queues:** celery (default), gan, ml, llm (future)
 
-### 3. Flower Monitoring 📊
-- **URL:** http://localhost:5555
-- **Purpose:** Real-time monitoring of Celery tasks and workers
-- **Features:** Task history, worker stats, performance metrics
-- **Port:** 5555
-
-### 4. Frontend Server (React + Vite) 🎨
+### 3. Frontend Server (React + Vite) 🎨
 - **URL:** http://localhost:5173
 - **Purpose:** Dashboard UI (auto-opens in browser)
 - **Features:** Hot module reload, fast refresh
@@ -82,14 +76,7 @@ cd "C:\Projects\Predictive Maintenance\frontend\server"
 celery -A celery_app worker --loglevel=info --pool=solo
 ```
 
-### Terminal 3 - Flower (Optional)
-```powershell
-cd "C:\Projects\Predictive Maintenance\frontend\server"
-& "C:/Projects/Predictive Maintenance/venv/Scripts/Activate.ps1"
-celery -A celery_app flower --port=5555
-```
-
-### Terminal 4 - Frontend
+### Terminal 3 - Frontend
 ```powershell
 cd "C:\Projects\Predictive Maintenance\frontend\client"
 npm run dev
@@ -102,7 +89,6 @@ npm run dev
 | **Frontend** | http://localhost:5173 | Main dashboard UI |
 | **Backend API** | http://localhost:8000 | REST API |
 | **API Docs** | http://localhost:8000/docs | Interactive API documentation |
-| **Flower** | http://localhost:5555 | Celery task monitoring |
 
 ## Files
 
@@ -133,10 +119,6 @@ If you see "port already in use" errors:
    Get-Process | Where-Object {$_.ProcessName -match "node|python"}
    ```
 3. Kill any remaining processes
-
-### Flower not accessible
-Flower is optional. If it doesn't start, the rest of the system will still work.
-You can skip it and monitor tasks through the backend API instead.
 
 ## Requirements
 

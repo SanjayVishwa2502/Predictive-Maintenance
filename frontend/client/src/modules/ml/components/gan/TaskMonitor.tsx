@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import {
   Alert,
   Box,
@@ -16,6 +16,7 @@ import { ganApi } from '../../api/ganApi';
 import { mlTrainingApi } from '../../api/mlTrainingApi';
 import { useTaskSession } from '../../context/TaskSessionContext';
 import { useDashboard } from '../../context/DashboardContext';
+import { useNotification } from '../../../../hooks/useNotification';
 
 function formatEta(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return '—';
@@ -40,6 +41,10 @@ export default function TaskMonitor() {
   const { setSelectedView, setSelectedMachineId } = useDashboard();
   const [error, setError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState<Record<string, boolean>>({});
+  const { notifyGANTrained, notifyMLTrained, notifyError } = useNotification();
+  
+  // Track which tasks we've already notified about
+  const notifiedTasksRef = useRef<Set<string>>(new Set());
 
   const allTasks = useMemo(() => {
     const byId = new Map<string, any>();
@@ -52,6 +57,28 @@ export default function TaskMonitor() {
   const activeTasks = useMemo(() => allTasks.filter((t) => t.status === 'RUNNING' || t.status === 'PENDING'), [allTasks]);
   const doneTasks = useMemo(() => allTasks.filter((t) => t.status === 'SUCCESS'), [allTasks]);
   const failedTasks = useMemo(() => allTasks.filter((t) => t.status === 'FAILURE'), [allTasks]);
+
+  // Notify when tasks complete
+  useEffect(() => {
+    for (const task of allTasks) {
+      if (notifiedTasksRef.current.has(task.task_id)) continue;
+      
+      if (task.status === 'SUCCESS') {
+        notifiedTasksRef.current.add(task.task_id);
+        if (task.kind === 'gan') {
+          notifyGANTrained(task.machine_id || 'Machine', task.progress_percent || 100);
+        } else if (task.kind === 'ml_train') {
+          notifyMLTrained('ML Models', undefined);
+        }
+      } else if (task.status === 'FAILURE') {
+        notifiedTasksRef.current.add(task.task_id);
+        notifyError(
+          `${task.kind.toUpperCase()} Task Failed`,
+          task.message || `Task ${task.task_id} failed`
+        );
+      }
+    }
+  }, [allTasks, notifyGANTrained, notifyMLTrained, notifyError]);
 
   const refresh = async () => {
     setError(null);

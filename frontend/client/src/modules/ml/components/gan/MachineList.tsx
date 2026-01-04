@@ -5,10 +5,6 @@ import {
   Button,
   Chip,
   CircularProgress,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
   IconButton,
   InputAdornment,
   Paper,
@@ -33,10 +29,12 @@ import {
 
 import { ganApi } from '../../api/ganApi';
 import type { MachineDetails } from '../../types/gan.types';
+import SecureDeleteDialog from '../../../../components/SecureDeleteDialog';
 
 interface MachineListProps {
   onMachineSelect: (machineId: string) => void;
   onRefresh?: () => void;
+  userRole?: 'admin' | 'operator' | 'viewer';
 }
 
 type StageChipColor = 'default' | 'primary' | 'success' | 'warning' | 'error' | 'info';
@@ -80,7 +78,7 @@ const getStatusTooltip = (m: MachineDetails): string => {
   )} | has_synthetic_data=${String(!!s.has_synthetic_data)}`;
 };
 
-export default function MachineList({ onMachineSelect, onRefresh }: MachineListProps) {
+export default function MachineList({ onMachineSelect, onRefresh, userRole }: MachineListProps) {
   const [machines, setMachines] = useState<MachineDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -217,11 +215,12 @@ export default function MachineList({ onMachineSelect, onRefresh }: MachineListP
     try {
       await ganApi.deleteMachine(machineToDelete);
       setMachines((prev) => prev.filter((m) => m.machine_id !== machineToDelete));
-      setDeleteDialogOpen(false);
       setMachineToDelete(null);
+      // Note: SecureDeleteDialog handles closing itself on success
     } catch (e: unknown) {
       const err = e as any;
       setError(err?.response?.data?.detail || err?.message || 'Failed to delete machine');
+      throw e; // Re-throw so SecureDeleteDialog knows it failed
     } finally {
       setDeleting(false);
     }
@@ -344,11 +343,13 @@ export default function MachineList({ onMachineSelect, onRefresh }: MachineListP
                             <PlayIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
-                        <Tooltip title="Delete machine">
-                          <IconButton size="small" onClick={() => handleDeleteClick(m.machine_id)}>
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
+                        {userRole === 'admin' && (
+                          <Tooltip title="Delete machine (Admin only)">
+                            <IconButton size="small" onClick={() => handleDeleteClick(m.machine_id)}>
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        )}
                       </Stack>
                     </TableCell>
                   </TableRow>
@@ -359,29 +360,15 @@ export default function MachineList({ onMachineSelect, onRefresh }: MachineListP
         </Table>
       </TableContainer>
 
-      <Dialog open={deleteDialogOpen} onClose={() => !deleting && setDeleteDialogOpen(false)}>
-        <DialogTitle>Delete Machine Profile?</DialogTitle>
-        <DialogContent>
-          <Typography>
-            Are you sure you want to delete machine <strong>{machineToDelete}</strong>? This will remove all associated data
-            including seed data, trained models, and generated datasets. This action cannot be undone.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDeleteDialogOpen(false)} disabled={deleting}>
-            Cancel
-          </Button>
-          <Button
-            onClick={handleDeleteConfirm}
-            color="error"
-            variant="contained"
-            disabled={deleting}
-            startIcon={deleting ? <CircularProgress size={16} /> : <DeleteIcon />}
-          >
-            {deleting ? 'Deleting...' : 'Delete'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <SecureDeleteDialog
+        open={deleteDialogOpen}
+        onClose={() => !deleting && setDeleteDialogOpen(false)}
+        onConfirm={handleDeleteConfirm}
+        title="Delete Machine Profile"
+        description="This will remove all associated data including seed data, trained models, and generated datasets."
+        itemName={machineToDelete || undefined}
+        confirmButtonText={deleting ? 'Deleting...' : 'Delete'}
+      />
     </Box>
   );
 }

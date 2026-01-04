@@ -47,7 +47,8 @@ import {
   Settings as SettingsIcon,
 } from '@mui/icons-material';
 
-import { ThemeProvider } from './theme';
+import { SettingsProvider } from './contexts/SettingsContext';
+import NotificationProvider from './components/NotificationProvider';
 import MLDashboardPage from './pages/MLDashboardPage';
 
 // ============================================================================
@@ -68,6 +69,7 @@ type UserInfo = {
   email: string;
   role: UserRole;
   is_active: boolean;
+  is_approved: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -188,12 +190,17 @@ async function apiRegister(
   username: string,
   email: string,
   password: string,
-  role: UserRole
+  role: UserRole,
+  adminApprovalPassword?: string
 ): Promise<UserInfo> {
+  const body: Record<string, string> = { username, email, password, role };
+  if (adminApprovalPassword && role === 'admin') {
+    body.admin_approval_password = adminApprovalPassword;
+  }
   const resp = await fetch(`${API_BASE_URL}/api/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, email, password, role }),
+    body: JSON.stringify(body),
   });
 
   if (!resp.ok) {
@@ -316,6 +323,8 @@ function AuthForm({ onLoggedIn }: { onLoggedIn: (user: UserInfo) => void }) {
   const [regPassword, setRegPassword] = useState('');
   const [regConfirmPassword, setRegConfirmPassword] = useState('');
   const [regRole, setRegRole] = useState<UserRole>('viewer');
+  const [regAdminApprovalPassword, setRegAdminApprovalPassword] = useState('');
+  const [showAdminApprovalPassword, setShowAdminApprovalPassword] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -354,7 +363,14 @@ function AuthForm({ onLoggedIn }: { onLoggedIn: (user: UserInfo) => void }) {
     try {
       const username = regUsername.trim();
       const email = regEmail.trim();
-      await apiRegister(username, email, regPassword, regRole);
+      // Pass admin approval password if registering as admin
+      await apiRegister(
+        username, 
+        email, 
+        regPassword, 
+        regRole,
+        regRole === 'admin' ? regAdminApprovalPassword : undefined
+      );
 
       // Auto-login after registration so the session is immediately persisted.
       const tokens = await apiLogin(username, regPassword);
@@ -362,7 +378,13 @@ function AuthForm({ onLoggedIn }: { onLoggedIn: (user: UserInfo) => void }) {
       const user = await apiGetMe(tokens.access_token);
       setCachedUserInfo(user);
       onLoggedIn(user);
-      setSuccess('Registration successful! You are now signed in.');
+
+      // Show appropriate success message based on role and approval status
+      if (regRole === 'operator' && !user.is_approved) {
+        setSuccess('Registration successful! Your operator account is pending admin approval. You have read-only access until approved.');
+      } else {
+        setSuccess('Registration successful! You are now signed in.');
+      }
 
       // Keep the login tab selected for consistency if user logs out later.
       setTab('login');
@@ -373,6 +395,7 @@ function AuthForm({ onLoggedIn }: { onLoggedIn: (user: UserInfo) => void }) {
       setRegPassword('');
       setRegConfirmPassword('');
       setRegRole('viewer');
+      setRegAdminApprovalPassword('');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Registration failed';
       setError(message);
@@ -665,6 +688,43 @@ function AuthForm({ onLoggedIn }: { onLoggedIn: (user: UserInfo) => void }) {
                     }}
                   />
 
+                  {/* Admin Approval Password - only shown when registering as admin */}
+                  {regRole === 'admin' && (
+                    <TextField
+                      label="Existing Admin Password"
+                      value={regAdminApprovalPassword}
+                      onChange={(e) => setRegAdminApprovalPassword(e.target.value)}
+                      type={showAdminApprovalPassword ? 'text' : 'password'}
+                      autoComplete="off"
+                      fullWidth
+                      disabled={submitting}
+                      helperText="Enter password of any existing admin to approve this registration. Not required for the first admin account."
+                      sx={{
+                        '& .MuiOutlinedInput-root': {
+                          borderColor: 'warning.main',
+                        },
+                      }}
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <AdminIcon color="warning" />
+                          </InputAdornment>
+                        ),
+                        endAdornment: (
+                          <InputAdornment position="end">
+                            <IconButton
+                              onClick={() => setShowAdminApprovalPassword(!showAdminApprovalPassword)}
+                              edge="end"
+                              size="small"
+                            >
+                              {showAdminApprovalPassword ? <VisibilityOff /> : <Visibility />}
+                            </IconButton>
+                          </InputAdornment>
+                        ),
+                      }}
+                    />
+                  )}
+
                   <Button
                     type="submit"
                     variant="contained"
@@ -824,33 +884,37 @@ function App() {
   // Loading state
   if (authState.loading) {
     return (
-      <ThemeProvider>
-        <Box
-          sx={{
-            minHeight: '100vh',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
-          }}
-        >
-          <Stack spacing={2} alignItems="center">
-            <CircularProgress size={48} sx={{ color: '#667eea' }} />
-            <Typography color="text.secondary">Loading...</Typography>
-          </Stack>
-        </Box>
-      </ThemeProvider>
+      <SettingsProvider>
+        <NotificationProvider>
+          <Box
+            sx={{
+              minHeight: '100vh',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
+            }}
+          >
+            <Stack spacing={2} alignItems="center">
+              <CircularProgress size={48} sx={{ color: '#667eea' }} />
+              <Typography color="text.secondary">Loading...</Typography>
+            </Stack>
+          </Box>
+        </NotificationProvider>
+      </SettingsProvider>
     );
   }
 
   return (
-    <ThemeProvider>
-      {authState.user ? (
-        <MLDashboardPage />
-      ) : (
-        <AuthForm onLoggedIn={handleLoggedIn} />
-      )}
-    </ThemeProvider>
+    <SettingsProvider>
+      <NotificationProvider>
+        {authState.user ? (
+          <MLDashboardPage />
+        ) : (
+          <AuthForm onLoggedIn={handleLoggedIn} />
+        )}
+      </NotificationProvider>
+    </SettingsProvider>
   );
 }
 

@@ -92,6 +92,27 @@ async def start_explain(request: Request, payload: Dict[str, Any]) -> Dict[str, 
     use_case = "combined"
     client_key = _client_key(request)
 
+    # If the client provides a run_id, always explain the stored run.
+    # This prevents mismatches when the UI has moved on to a new snapshot.
+    run_id = str(payload.get("run_id") or "").strip()
+    if run_id:
+        try:
+            from services.history_store import get_run
+
+            run = await get_run(run_id)
+            if run:
+                # Override payload with the canonical stored context.
+                payload = dict(payload)
+                payload["run_id"] = run.get("run_id") or run_id
+                payload["machine_id"] = run.get("machine_id") or machine_id
+                payload["data_stamp"] = run.get("data_stamp")
+                payload["sensor_data"] = run.get("sensor_data") or {}
+                payload["predictions"] = run.get("predictions") or {}
+                machine_id = str(payload.get("machine_id") or "").strip()
+        except Exception:
+            # Best-effort: if lookup fails, fall back to provided payload.
+            pass
+
     # Include client_id for WebSocket push updates (Redis pub/sub)
     # Keep the original payload shape otherwise.
     payload = dict(payload)
@@ -102,6 +123,8 @@ async def start_explain(request: Request, payload: Dict[str, Any]) -> Dict[str, 
 
     redis_client: Optional[redis.Redis] = None
     try:
+        from services.llm_busy import set_llm_busy
+
         redis_client = await _get_redis()
 
         inflight_key = _redis_key_inflight(client_key, machine_id, use_case)
@@ -119,6 +142,8 @@ async def start_explain(request: Request, payload: Dict[str, Any]) -> Dict[str, 
             if existing_task_id:
                 state = celery_app.AsyncResult(existing_task_id).state
                 if not _is_terminal_state(state):
+                    # Ensure the machine is marked busy (best-effort) while the task is inflight.
+                    await set_llm_busy(machine_id, task_id=existing_task_id, client_id=client_key)
                     return {
                         "success": True,
                         "task_id": existing_task_id,
@@ -157,6 +182,9 @@ async def start_explain(request: Request, payload: Dict[str, Any]) -> Dict[str, 
             args=[payload],
             queue="llm",
         )
+
+        # Mark machine busy so ML auto-predictions can pause until LLM completes.
+        await set_llm_busy(machine_id, task_id=task.id, client_id=client_key)
 
         submitted_at = datetime.utcnow().isoformat()
         await redis_client.setex(

@@ -50,6 +50,8 @@ from api.services.gan_manager_wrapper import gan_manager_wrapper
 from tasks.gan_tasks import train_tvae_task, generate_data_task, generate_seed_data_task
 from celery_app import celery_app
 from config import settings
+from api.dependencies import require_admin
+from db import models
 
 logger = logging.getLogger(__name__)
 
@@ -366,9 +368,12 @@ async def set_workflow_continue_state(request: Request, state: ContinueWorkflowS
 @router.delete(
     "/workflow/continue",
     response_model=ContinueWorkflowResponse,
-    summary="Clear persisted workflow continuation state",
+    summary="Clear persisted workflow continuation state (Admin Only)",
 )
-async def clear_workflow_continue_state(request: Request):
+async def clear_workflow_continue_state(
+    request: Request,
+    current_user: models.User = Depends(require_admin),
+):
     await rate_limiter(request)
     await _clear_continue_state(request)
     return ContinueWorkflowResponse(has_state=False, state=None)
@@ -1790,9 +1795,9 @@ async def get_workflow_status(machine_id: str) -> MachineWorkflowStatus:
 
 @router.delete(
     "/machines/{machine_id}",
-    summary="Delete Machine and Data",
+    summary="Delete Machine and Data (Admin Only)",
     description="""
-    Delete machine and all associated data.
+    Delete machine and all associated data. Requires admin role.
     
     **Parameters:**
     - machine_id: Machine identifier
@@ -1809,12 +1814,16 @@ async def get_workflow_status(machine_id: str) -> MachineWorkflowStatus:
     """,
     responses={
         200: {"description": "Machine deleted successfully"},
+        401: {"description": "Unauthorized - Admin role required"},
         404: {"description": "Machine not found"},
         429: {"description": "Rate limit exceeded"}
     },
     dependencies=[Depends(rate_limiter)]
 )
-async def delete_machine(machine_id: str) -> Dict[str, str]:
+async def delete_machine(
+    machine_id: str,
+    current_user: models.User = Depends(require_admin),
+) -> Dict[str, str]:
     """Delete machine and all data"""
     try:
         if not _machine_exists(machine_id):

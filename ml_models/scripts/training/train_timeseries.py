@@ -46,6 +46,13 @@ class ProphetForecaster:
         self.forecast_hours = forecast_hours
         self.models = {}  # One Prophet model per sensor
         self.sensor_cols = []
+        # Default: hourly forecasts. Printers are higher-cadence; we downsample to 5-min
+        # and forecast at 5-min steps to avoid huge arrays.
+        self.freq = 'H'
+        self.steps_per_hour = 1
+        if str(machine_id).startswith('printer_'):
+            self.freq = '5min'
+            self.steps_per_hour = 12
         
     def load_data(self):
         """Load time-series data"""
@@ -54,11 +61,49 @@ class ProphetForecaster:
         print(f"{'='*70}\n")
         
         project_root = Path(__file__).parent.parent.parent.parent
-        base_path = project_root / 'GAN' / 'data' / 'synthetic' / self.machine_id
-        
-        train_df = pd.read_parquet(base_path / 'train.parquet')
-        val_df = pd.read_parquet(base_path / 'val.parquet')
-        test_df = pd.read_parquet(base_path / 'test.parquet')
+
+        # For printers, train from real CSV telemetry instead of GAN synthetic parquet.
+        if str(self.machine_id).startswith('printer_'):
+            candidates = [
+                project_root / '3Dprinterdata' / f'{self.machine_id}_temps_clean.csv',
+                project_root / '3Dprinterdata' / 'ender3_temps_clean.csv',
+                project_root / '3Dprinterdata' / 'printer_creality_ender3_001_temps_clean.csv',
+            ]
+            csv_path = next((p for p in candidates if p.exists()), None)
+            if csv_path is None:
+                raise FileNotFoundError(
+                    f'Printer telemetry not found for {self.machine_id}. Expected CSV in 3Dprinterdata/'
+                )
+            df = pd.read_csv(csv_path)
+            df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce', utc=True)
+            df = df.dropna(subset=['timestamp']).sort_values('timestamp').reset_index(drop=True)
+            # Ensure required columns
+            for c in ['bed_temp_c', 'nozzle_temp_c']:
+                if c not in df.columns:
+                    raise ValueError(f"Printer CSV missing column '{c}': {csv_path}")
+                df[c] = pd.to_numeric(df[c], errors='coerce')
+            df = df.dropna(subset=['bed_temp_c', 'nozzle_temp_c'])
+
+            # Downsample to configured freq (5-min) so Prophet is stable and forecasting is tractable.
+            df = df.set_index('timestamp')[['bed_temp_c', 'nozzle_temp_c']].resample(self.freq).mean().dropna().reset_index()
+
+            # Prophet requires timezone-naive datetimes.
+            try:
+                df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True).dt.tz_localize(None)
+            except Exception:
+                df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+
+            # Simple split: 80/20 chronological
+            n = len(df)
+            split = max(10, int(n * 0.8))
+            train_df = df.iloc[:split].copy()
+            val_df = df.iloc[split:split].copy()
+            test_df = df.iloc[split:].copy()
+        else:
+            base_path = project_root / 'GAN' / 'data' / 'synthetic' / self.machine_id
+            train_df = pd.read_parquet(base_path / 'train.parquet')
+            val_df = pd.read_parquet(base_path / 'val.parquet')
+            test_df = pd.read_parquet(base_path / 'test.parquet')
         
         # Combine train + val for final training
         train_val_df = pd.concat([train_df, val_df], ignore_index=True)
@@ -72,7 +117,7 @@ class ProphetForecaster:
         
         # Get sensor columns
         self.sensor_cols = [col for col in train_val_df.columns 
-                           if col not in ['timestamp', 'rul']]
+                   if col not in ['timestamp', 'rul']]
         
         print(f"  Sensors: {len(self.sensor_cols)} features")
         print(f"  Timespan: {train_val_df['timestamp'].min()} to {train_val_df['timestamp'].max()}")
@@ -82,17 +127,40 @@ class ProphetForecaster:
     def train_sensor_model(self, df, sensor_col):
         """Train Prophet model for a single sensor"""
         # Prepare data in Prophet format (ds, y)
+        ds = pd.to_datetime(df['timestamp'], errors='coerce')
+        try:
+            # If tz-aware, strip tz
+            if hasattr(ds.dt, 'tz') and ds.dt.tz is not None:
+                ds = ds.dt.tz_localize(None)
+        except Exception:
+            pass
         sensor_df = pd.DataFrame({
-            'ds': df['timestamp'],
+            'ds': ds,
             'y': df[sensor_col]
         })
+
+        # Choose seasonality based on data span (prevents wild extrapolation on short logs).
+        span_days = 0.0
+        try:
+            ds_min = pd.to_datetime(sensor_df['ds'], errors='coerce').min()
+            ds_max = pd.to_datetime(sensor_df['ds'], errors='coerce').max()
+            if pd.notna(ds_min) and pd.notna(ds_max):
+                span_days = float((ds_max - ds_min).total_seconds() / 86400.0)
+        except Exception:
+            span_days = 0.0
+
+        daily = span_days >= 2.0
+        weekly = span_days >= 14.0
+
+        # Printers: prioritize stability over flexibility.
+        is_printer = str(self.machine_id).startswith('printer_')
         
         # Initialize Prophet with optimized parameters
         model = Prophet(
-            changepoint_prior_scale=0.05,  # Flexibility of trend
-            seasonality_prior_scale=10.0,   # Flexibility of seasonality
-            daily_seasonality=True,
-            weekly_seasonality=True,
+            changepoint_prior_scale=0.01 if is_printer else 0.05,  # trend flexibility
+            seasonality_prior_scale=1.0 if is_printer else 10.0,   # seasonality flexibility
+            daily_seasonality=daily,
+            weekly_seasonality=weekly,
             yearly_seasonality=False,       # Not enough data for yearly
             seasonality_mode='additive',
             interval_width=0.95
@@ -133,7 +201,7 @@ class ProphetForecaster:
         # Create future dataframe (only future periods, not historical)
         last_date = model.history['ds'].max()
         future = pd.DataFrame({
-            'ds': pd.date_range(start=last_date, periods=periods+1, freq='H')[1:]
+            'ds': pd.date_range(start=last_date, periods=periods+1, freq=self.freq)[1:]
         })
         
         # Generate forecast WITHOUT uncertainty intervals (faster)
@@ -148,17 +216,21 @@ class ProphetForecaster:
         print(f"Evaluating models on test set...")
         print(f"{'='*70}\n")
         
-        # Simply forecast the first 24 hours of test set from training data
+        # Forecast the next horizon from training data. For sub-hourly printers,
+        # this evaluates forecast_hours worth of steps at the configured frequency.
         all_predictions = []
         all_actuals = []
         sensor_metrics = {}
+
+        steps = int(self.forecast_hours * (self.steps_per_hour or 1))
+        steps_eval = int(min(max(1, steps), len(test_df)))
         
         for sensor in self.sensor_cols:
             # Get actual test values for first forecast_hours
-            actual = test_df[sensor].iloc[:self.forecast_hours].values
+            actual = test_df[sensor].iloc[:steps_eval].values
             
             # Generate forecast from trained model
-            forecast = self.forecast_sensor(self.models[sensor], self.forecast_hours)
+            forecast = self.forecast_sensor(self.models[sensor], steps_eval)
             predicted = forecast['yhat'].values
             
             # Calculate metrics for this sensor
@@ -195,7 +267,7 @@ class ProphetForecaster:
             'mae': float(overall_mae),
             'rmse': float(overall_rmse),
             'mape': float(overall_mape),
-            'n_test_samples': self.forecast_hours,  # 24 hours evaluated
+            'n_test_samples': steps_eval,
             'n_sensors': len(self.sensor_cols),
             'sensor_metrics': sensor_metrics
         }
@@ -233,6 +305,8 @@ class ProphetForecaster:
         metadata = {
             'machine_id': self.machine_id,
             'forecast_hours': self.forecast_hours,
+            'freq': self.freq,
+            'steps_per_hour': self.steps_per_hour,
             'sensor_cols': self.sensor_cols,
             'n_sensors': len(self.sensor_cols),
             'training_time_seconds': training_time,

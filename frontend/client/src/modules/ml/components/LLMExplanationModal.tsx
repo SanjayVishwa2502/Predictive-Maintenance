@@ -94,6 +94,10 @@ export interface LLMExplanationModalProps {
 }
 
 export interface PredictionData {
+  // Prefer run-scoped explanations when available.
+  // If run_id is provided, the backend will load the exact stored run context
+  // (sensor_data + predictions) and generate a consistent explanation.
+  run_id?: string;
   health_state: string;
   confidence: number;
   failure_probability: number;
@@ -133,20 +137,27 @@ const fetchExplanation = async (
   apiEndpoint: string
 ): Promise<ExplanationResponse> => {
   const explainUrl = apiEndpoint.startsWith('http') ? apiEndpoint : `${API_BASE_URL}${apiEndpoint}`;
+  const runId = (predictionData.run_id || '').trim();
+  const body = runId
+    ? {
+        machine_id: machineId,
+        run_id: runId,
+      }
+    : {
+        machine_id: machineId,
+        health_state: predictionData.health_state,
+        confidence: predictionData.confidence,
+        failure_probability: predictionData.failure_probability,
+        predicted_failure_type: predictionData.predicted_failure_type,
+        rul_hours: predictionData.rul_hours,
+        sensor_data: predictionData.sensor_data,
+      };
   const response = await fetchWithAuth(explainUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      machine_id: machineId,
-      health_state: predictionData.health_state,
-      confidence: predictionData.confidence,
-      failure_probability: predictionData.failure_probability,
-      predicted_failure_type: predictionData.predicted_failure_type,
-      rul_hours: predictionData.rul_hours,
-      sensor_data: predictionData.sensor_data,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {

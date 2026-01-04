@@ -13,6 +13,7 @@ import type { TaskStatusResponse } from '../../types/gan.types';
 import { mlTrainingApi } from '../../api/mlTrainingApi';
 import { useTaskSession } from '../../context/TaskSessionContext';
 import { TrainingResultsDashboard } from './TrainingResultsDashboard';
+import { useNotification } from '../../../../hooks/useNotification';
 
 function isTerminal(status: TaskStatusResponse['status']): boolean {
   return status === 'SUCCESS' || status === 'FAILURE' || status === 'REVOKED';
@@ -109,9 +110,24 @@ export function TrainingProgressMonitor({ taskId }: { taskId: string }) {
   const [pollError, setPollError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
+  const [hasNotified, setHasNotified] = useState(false);
 
   const logsRef = useRef<HTMLDivElement | null>(null);
   const { updateTaskFromStatus } = useTaskSession();
+  const { notifyMLTrained, notifyError } = useNotification();
+
+  // Notify when training completes
+  useEffect(() => {
+    if (!status || hasNotified) return;
+    
+    if (status.status === 'SUCCESS') {
+      notifyMLTrained('ML Models', undefined);
+      setHasNotified(true);
+    } else if (status.status === 'FAILURE') {
+      notifyError('ML Training Failed', status.progress?.message || 'Training task failed');
+      setHasNotified(true);
+    }
+  }, [status, hasNotified, notifyMLTrained, notifyError]);
 
   useEffect(() => {
     let mounted = true;

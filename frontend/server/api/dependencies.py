@@ -86,6 +86,29 @@ def get_current_active_user(
     return current_user
 
 
+def get_current_approved_user(
+    current_user: models.User = Depends(get_current_active_user),
+) -> models.User:
+    """
+    Dependency to get current approved user.
+    
+    Extends get_current_active_user to also check if user is approved.
+    Unapproved operators are blocked from using operator-level permissions.
+    
+    Usage:
+        @app.post("/run-prediction")
+        def run_prediction(user: models.User = Depends(get_current_approved_user)):
+            return {"user": user.username}
+    """
+    # Check approval status - unapproved operators are treated as pending
+    if not getattr(current_user, 'is_approved', True):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account is pending approval by an administrator",
+        )
+    return current_user
+
+
 def require_role(allowed_roles: List[str]):
     """
     Dependency factory for role-based access control.
@@ -114,7 +137,7 @@ def require_role(allowed_roles: List[str]):
             # Admins and operators can access this endpoint
             return get_all_data()
     """
-    def check_role(current_user: models.User = Depends(get_current_active_user)) -> models.User:
+    def check_role(current_user: models.User = Depends(get_current_approved_user)) -> models.User:
         if current_user.role not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

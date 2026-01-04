@@ -44,6 +44,7 @@ import {
   Search as SearchIcon,
   Visibility as ViewIcon,
 } from '@mui/icons-material';
+import SecureDeleteDialog from '../../../components/SecureDeleteDialog';
 
 const ACCESS_TOKEN_KEY = 'pm_access_token';
 const REFRESH_TOKEN_KEY = 'pm_refresh_token';
@@ -92,6 +93,8 @@ export interface PredictionHistoryProps {
   limit?: number;
   sessionId?: string;
   onRowClick?: (prediction: HistoricalPrediction) => void;
+  onHistoryCleared?: () => void;
+  userRole?: 'admin' | 'operator' | 'viewer';
 }
 
 export interface HistoricalPrediction {
@@ -182,6 +185,8 @@ export default function PredictionHistory({
   limit = 100,
   sessionId,
   onRowClick,
+  onHistoryCleared,
+  userRole,
 }: PredictionHistoryProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [dateRange, setDateRange] = useState('all');
@@ -191,6 +196,10 @@ export default function PredictionHistory({
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [runDetails, setRunDetails] = useState<RunDetails | null>(null);
+  const [clearingHistory, setClearingHistory] = useState(false);
+  
+  // Secure delete dialog state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   // Filter predictions
   const filteredPredictions = useMemo(() => {
@@ -273,6 +282,31 @@ export default function PredictionHistory({
     setExplanationFilter(v);
   };
 
+  const handleDeleteClick = () => {
+    setDeleteDialogOpen(true);
+  };
+
+  const clearAllHistory = async () => {
+    const mid = (machineId || '').trim();
+    if (!mid || clearingHistory) return;
+
+    setClearingHistory(true);
+    try {
+      const resp = await fetchWithAuth(`${API_BASE}/api/ml/machines/${encodeURIComponent(mid)}/history`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!resp.ok) {
+        const errorText = await resp.text().catch(() => 'Delete failed');
+        throw new Error(errorText || 'Delete failed');
+      }
+      onHistoryCleared?.();
+    } finally {
+      setClearingHistory(false);
+    }
+  };
+
   // DataGrid columns
   const columns: GridColDef[] = [
     {
@@ -294,14 +328,6 @@ export default function PredictionHistory({
         const hasExplanation = Boolean(params.row.has_explanation);
         const runType = params.row.run_type as string | undefined;
         
-        // Debug log
-        console.log('[PredictionHistory] Row status:', { 
-          run_id: params.row.run_id, 
-          run_type: runType, 
-          hasRun, 
-          hasExplanation 
-        });
-        
         // Determine label and palette based on run_type
         let label: string;
         let palette: { bg: string; fg: string; border: string };
@@ -309,14 +335,14 @@ export default function PredictionHistory({
         if (!hasRun) {
           label = 'NO RUN';
           palette = { bg: 'rgba(156,163,175,0.12)', fg: '#9ca3af', border: 'rgba(156,163,175,0.25)' };
-        } else if (runType === 'prediction') {
-          // ML-only auto prediction (blue)
-          label = 'PREDICTION';
-          palette = { bg: 'rgba(59,130,246,0.15)', fg: '#3b82f6', border: 'rgba(59,130,246,0.35)' };
         } else if (hasExplanation) {
           // Full with LLM explanation (green)
           label = 'EXPLAINED';
           palette = { bg: 'rgba(16,185,129,0.15)', fg: '#10b981', border: 'rgba(16,185,129,0.35)' };
+        } else if (runType === 'prediction') {
+          // ML-only auto prediction (blue)
+          label = 'PREDICTION';
+          palette = { bg: 'rgba(59,130,246,0.15)', fg: '#3b82f6', border: 'rgba(59,130,246,0.35)' };
         } else {
           // Run exists but no explanation yet (yellow)
           label = 'PENDING';
@@ -534,6 +560,17 @@ export default function PredictionHistory({
           >
             View Dataset
           </Button>
+
+          {userRole === 'admin' && (
+            <Button
+              variant="outlined"
+              color="error"
+              disabled={clearingHistory || !machineId.trim()}
+              onClick={handleDeleteClick}
+            >
+              Delete All Prediction History
+            </Button>
+          )}
         </Stack>
 
         {/* DATA GRID */}
@@ -750,6 +787,17 @@ export default function PredictionHistory({
           </>
         )}
       </Dialog>
+
+      {/* Secure Delete Dialog for Admin */}
+      <SecureDeleteDialog
+        open={deleteDialogOpen}
+        onClose={() => setDeleteDialogOpen(false)}
+        onConfirm={clearAllHistory}
+        title="Delete All Prediction History"
+        description="This will permanently delete all prediction history, snapshots, and runs for this machine."
+        itemName={machineId}
+        confirmButtonText={clearingHistory ? 'Deleting...' : 'Delete All History'}
+      />
     </Card>
   );
 }

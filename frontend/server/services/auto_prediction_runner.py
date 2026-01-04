@@ -13,6 +13,8 @@ from services.ml_manager import ml_manager
 from services.sensor_simulator import get_simulator
 from services.history_store import SnapshotItem, add_snapshot, create_run, get_latest_snapshot
 from services.wide_dataset_csv import append_run_row
+from services.printer_log_reader import read_latest_printer_reading
+from services.llm_busy import set_llm_busy
 
 logger = logging.getLogger(__name__)
 
@@ -100,21 +102,37 @@ class AutoPredictionRunner:
         # the same data_stamp and can cause stamp->run_id mapping churn (making the UI appear
         # like LLM is perpetually "pending" for that stamp).
         prior_snapshot = await get_latest_snapshot(mid)
-        simulator = get_simulator()
-        if not simulator.is_running(mid):
-            try:
-                simulator.start_simulation(mid)
-            except Exception:
-                pass
-
-        fresh_sensor_data: Optional[Dict[str, Any]]
+        
+        # PRIORITY 1: Try to read REAL-TIME sensor data from the printer's CSV log
+        # This is the datalogger output that contains current/live readings
+        fresh_sensor_data: Optional[Dict[str, Any]] = None
         try:
-            fresh_sensor_data = simulator.get_current_readings(mid) if simulator.is_running(mid) else None
-        except Exception:
-            fresh_sensor_data = None
+            printer_reading = read_latest_printer_reading(mid)
+            if printer_reading is not None:
+                fresh_sensor_data = printer_reading.to_sensors()
+                logger.info(f"[run_once] Using real-time printer data for {mid}: {fresh_sensor_data}")
+        except Exception as e:
+            logger.warning(f"[run_once] Failed to read real-time printer data for {mid}: {e}")
+        
+        # PRIORITY 2: Fall back to simulator if no real-time data available
+        if not fresh_sensor_data:
+            simulator = get_simulator()
+            if not simulator.is_running(mid):
+                try:
+                    simulator.start_simulation(mid)
+                except Exception:
+                    pass
+            try:
+                fresh_sensor_data = simulator.get_current_readings(mid) if simulator.is_running(mid) else None
+                if fresh_sensor_data:
+                    logger.info(f"[run_once] Using simulator data for {mid}: {fresh_sensor_data}")
+            except Exception:
+                fresh_sensor_data = None
 
+        # PRIORITY 3: Fall back to prior snapshot if all else fails
         if not fresh_sensor_data:
             fresh_sensor_data = (prior_snapshot.sensor_data if prior_snapshot else {}) or {}
+            logger.info(f"[run_once] Using prior snapshot data for {mid}: {fresh_sensor_data}")
 
         snapshot = await add_snapshot(mid, sensor_data=fresh_sensor_data, data_stamp=_utc_stamp())
 
@@ -150,11 +168,14 @@ class AutoPredictionRunner:
         }
 
         payload = {**base_payload, "use_case": "combined", "predictions": predictions}
-        celery_app.send_task(
+        task = celery_app.send_task(
             "tasks.llm_tasks.generate_explanation",
             args=[payload],
             queue="llm",
         )
+
+        # Mark machine as LLM-busy so frontend shows loading state
+        await set_llm_busy(mid, task_id=task.id, client_id=client_id)
 
         self._last_run[mid] = _utc_stamp()
         return {

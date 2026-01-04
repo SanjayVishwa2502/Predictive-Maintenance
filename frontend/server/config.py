@@ -68,7 +68,6 @@ class Settings(BaseSettings):
     CELERY_WORKER_PREFETCH_MULTIPLIER: int = 1
     
     # Monitoring
-    FLOWER_PORT: int = 5555
     PROMETHEUS_PORT: int = 9090
     
     # Logging

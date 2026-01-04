@@ -335,11 +335,10 @@ Use the provided batch scripts to start all services:
 .\stop_dashboard.ps1
 ```
 
-This will launch four separate terminal windows:
+This will launch separate terminal windows for:
 1. **Backend API** (FastAPI on port 8000)
-2. **Celery Worker** (Background task processor)
-3. **Flower** (Task monitoring dashboard on port 5555)
-4. **Frontend** (React development server on port 5173)
+2. **Celery Worker(s)** (Background task processor)
+3. **Frontend** (React development server on port 5173)
 
 #### Manual Start (Advanced)
 
@@ -357,14 +356,7 @@ cd frontend/server
 celery -A celery_app worker --loglevel=info --pool=solo
 ```
 
-**Terminal 3 - Flower Monitoring:**
-```powershell
-cd frontend/server
-.\venv\Scripts\Activate.ps1
-celery -A celery_app flower --port=5555
-```
-
-**Terminal 4 - Frontend:**
+**Terminal 3 - Frontend:**
 ```powershell
 cd frontend/client
 npm run dev
@@ -376,7 +368,6 @@ npm run dev
 |---------|-----|-------------|
 | **Dashboard** | http://localhost:5173 | Main application interface |
 | **API Documentation** | http://localhost:8000/docs | Interactive API documentation (Swagger) |
-| **Flower** | http://localhost:5555 | Task monitoring and worker management |
 | **API Health** | http://localhost:8000/health | System health check endpoint |
 
 ---

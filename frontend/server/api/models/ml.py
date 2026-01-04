@@ -214,7 +214,10 @@ class MachineStatusResponse(BaseModel):
     last_update: datetime = Field(..., description="Timestamp of last sensor update")
     data_stamp: Optional[str] = Field(None, description="Stable UTC data stamp for this snapshot (ISO8601)")
     run_id: Optional[str] = Field(None, description="Prediction run id associated with this snapshot (if any)")
+    run_type: Optional[str] = Field(None, description="Run type for run_id (prediction|explanation)")
     sensor_count: int = Field(..., description="Number of sensors", ge=0)
+    data_age_seconds: Optional[float] = Field(None, description="Age of sensor data in seconds (stale if > 60s)")
+    llm_busy: bool = Field(False, description="Whether LLM is currently generating an explanation for this machine")
     
     class Config:
         schema_extra = {
@@ -232,7 +235,9 @@ class MachineStatusResponse(BaseModel):
                 "last_update": "2025-12-15T10:45:23Z",
                 "data_stamp": "2025-12-15T10:45:23Z",
                 "run_id": "5dd0d7f5-6a41-4ba0-8f6a-83b886d58c77",
-                "sensor_count": 22
+                "sensor_count": 22,
+                "data_age_seconds": 5.2,
+                "llm_busy": False
             }
         }
 

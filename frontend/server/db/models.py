@@ -35,6 +35,11 @@ class User(Base):
     """
     User model for authentication and authorization.
     Phase 3.7.1.3: Authentication Setup
+    
+    Approval system:
+    - Viewers: auto-approved on registration
+    - Operators: require admin approval after registration
+    - Admins: require existing admin password during registration
     """
     __tablename__ = "users"
 
@@ -50,6 +55,13 @@ class User(Base):
         # Valid roles: admin, operator, viewer
     )
     is_active = Column(Boolean, default=True, nullable=False, index=True)
+    is_approved = Column(
+        Boolean,
+        default=True,
+        nullable=False,
+        index=True,
+        # True for viewers (auto-approved), False for pending operators
+    )
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),

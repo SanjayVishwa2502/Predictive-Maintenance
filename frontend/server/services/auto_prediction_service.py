@@ -115,14 +115,89 @@ async def run_prediction_only(
         
         # Anomaly
         try:
-            ano = ml_manager.predict_anomaly(machine_id=mid, sensor_data=sensor_data)
+            anomaly_input = sensor_data
+            # Printers benefit from lightweight derived features (deltas, short-window stats)
+            # and from using recent history rather than a single point.
+            if mid.startswith("printer_"):
+                from services.history_store import list_snapshots
+
+                snaps = await list_snapshots(mid, limit=120)
+                # snaps are newest-first; build oldest-first series
+                series = list(reversed(snaps))
+                # Append current point if needed
+                if not series or str(series[-1].get("data_stamp") or "") != str(data_stamp):
+                    series.append({"data_stamp": data_stamp, "sensor_data": sensor_data})
+
+                def _get_float(s: dict, k: str) -> Optional[float]:
+                    try:
+                        v = (s.get("sensor_data") or {}).get(k)
+                        return float(v) if v is not None else None
+                    except Exception:
+                        return None
+
+                bed_vals = [v for v in (_get_float(s, "bed_temp_c") for s in series) if v is not None]
+                noz_vals = [v for v in (_get_float(s, "nozzle_temp_c") for s in series) if v is not None]
+
+                # 60-second-ish window (best-effort, based on sample count)
+                bed_tail = bed_vals[-12:] if len(bed_vals) >= 12 else bed_vals
+                noz_tail = noz_vals[-12:] if len(noz_vals) >= 12 else noz_vals
+
+                bed = float(sensor_data.get("bed_temp_c")) if sensor_data.get("bed_temp_c") is not None else None
+                noz = float(sensor_data.get("nozzle_temp_c")) if sensor_data.get("nozzle_temp_c") is not None else None
+                bed_prev = bed_vals[-2] if len(bed_vals) >= 2 else None
+                noz_prev = noz_vals[-2] if len(noz_vals) >= 2 else None
+
+                anomaly_input = dict(sensor_data)
+                if bed is not None and bed_prev is not None:
+                    anomaly_input["bed_temp_c_delta"] = float(bed - bed_prev)
+                if noz is not None and noz_prev is not None:
+                    anomaly_input["nozzle_temp_c_delta"] = float(noz - noz_prev)
+                if bed_tail:
+                    anomaly_input["bed_temp_c_mean_60s"] = float(sum(bed_tail) / len(bed_tail))
+                    try:
+                        import numpy as _np
+                        anomaly_input["bed_temp_c_std_60s"] = float(_np.std(_np.array(bed_tail, dtype=float)))
+                    except Exception:
+                        pass
+                if noz_tail:
+                    anomaly_input["nozzle_temp_c_mean_60s"] = float(sum(noz_tail) / len(noz_tail))
+                    try:
+                        import numpy as _np
+                        anomaly_input["nozzle_temp_c_std_60s"] = float(_np.std(_np.array(noz_tail, dtype=float)))
+                    except Exception:
+                        pass
+
+            ano = ml_manager.predict_anomaly(machine_id=mid, sensor_data=anomaly_input)
             predictions["anomaly"] = asdict(ano)
         except Exception as e:
             predictions["anomaly"] = {"error": str(e)}
-        
+
         # Time-series
         try:
-            ts = ml_manager.predict_timeseries(machine_id=mid, sensor_data=sensor_data)
+            ts_input = sensor_data
+            # For timeseries, use a rolling window of recent snapshots so the model
+            # can align to recent behavior and produce non-constant summaries.
+            from services.history_store import list_snapshots
+            snaps = await list_snapshots(mid, limit=500)
+            series = list(reversed(snaps))
+            # Convert to a list of {timestamp, <sensor...>} rows.
+            rows = []
+            for s in series:
+                stamp = str(s.get("data_stamp") or "").strip()
+                sd = s.get("sensor_data") or {}
+                if not stamp or not isinstance(sd, dict) or not sd:
+                    continue
+                row = {"timestamp": stamp}
+                row.update(sd)
+                rows.append(row)
+            # Add current point (ensures latest is included)
+            if data_stamp:
+                row = {"timestamp": data_stamp}
+                row.update(sensor_data)
+                rows.append(row)
+            ts_input = rows if rows else sensor_data
+
+            ts = ml_manager.predict_timeseries(machine_id=mid, sensor_data=ts_input)
             predictions["timeseries"] = asdict(ts)
         except Exception as e:
             predictions["timeseries"] = {"error": str(e)}

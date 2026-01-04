@@ -107,6 +107,23 @@ async def add_snapshot(machine_id: str, sensor_data: Dict[str, Any], data_stamp:
 
     r = await _get_redis()
     key = _snapshots_key(machine_id)
+    # Avoid duplicate rows when the caller polls multiple times within the same data_stamp.
+    # If the latest snapshot has the same stamp, overwrite it instead of pushing a new entry.
+    try:
+        latest_raw = await r.lindex(key, 0)
+        if latest_raw:
+            latest_obj = json.loads(latest_raw)
+            latest_stamp = str(latest_obj.get("data_stamp") or "").strip()
+            if latest_stamp == stamp:
+                pipe = r.pipeline()
+                pipe.lset(key, 0, json.dumps(payload, default=str))
+                pipe.expire(key, SNAPSHOT_TTL_SECONDS)
+                await pipe.execute()
+                return SnapshotItem(machine_id=machine_id, data_stamp=stamp, sensor_data=sensor_data or {})
+    except Exception:
+        # Best-effort only; fall back to pushing.
+        pass
+
     pipe = r.pipeline()
     pipe.lpush(key, json.dumps(payload, default=str))
     pipe.ltrim(key, 0, MAX_SNAPSHOTS_PER_MACHINE - 1)
@@ -145,6 +162,7 @@ async def list_snapshots(machine_id: str, limit: int = 500) -> List[Dict[str, An
     snapshots: List[Dict[str, Any]] = []
     pipe = r.pipeline()
     stamps: List[str] = []
+    seen: set[str] = set()
     for raw in raws:
         try:
             obj = json.loads(raw)
@@ -153,6 +171,9 @@ async def list_snapshots(machine_id: str, limit: int = 500) -> List[Dict[str, An
         stamp = str(obj.get("data_stamp") or "").strip()
         if not stamp:
             continue
+        if stamp in seen:
+            continue
+        seen.add(stamp)
         stamps.append(stamp)
         pipe.get(_run_by_stamp_key(machine_id, stamp))
         snapshots.append(
@@ -351,6 +372,8 @@ async def update_run_llm(run_id: str, use_case: str, summary: str, compute: str 
         "updated_at": _utc_now_stamp(),
     }
     obj["llm"] = llm
+    # If an LLM summary exists, treat this run as an "explanation" run for UI labeling.
+    obj["run_type"] = "explanation"
     await r.set(_run_key(run_id), json.dumps(obj, default=str), ex=RUN_TTL_SECONDS)
 
     append_event(
@@ -369,3 +392,67 @@ async def create_run_prediction_only(machine_id: str, snapshot: SnapshotItem, pr
     Used by auto_prediction_service for automatic ML runs every Nth data point.
     """
     return await create_run(machine_id, snapshot, predictions, run_type="prediction")
+
+
+async def clear_machine_history(machine_id: str) -> Dict[str, int]:
+    """Delete all stored snapshots and runs for a machine.
+
+    This is used by the dashboard's "Delete All Prediction History" button.
+    It clears:
+    - snapshot list
+    - run id list
+    - run details records
+    - stamp -> run_id mappings
+
+    Returns counts (best-effort) of keys deleted.
+    """
+    mid = (machine_id or "").strip()
+    if not mid:
+        return {"deleted": 0}
+
+    r = await _get_redis()
+
+    # Gather stamps from snapshots so we can delete stamp->run mappings without SCAN.
+    stamps: List[str] = []
+    try:
+        raws = await r.lrange(_snapshots_key(mid), 0, -1)
+        for raw in raws:
+            try:
+                obj = json.loads(raw)
+            except Exception:
+                continue
+            stamp = str(obj.get("data_stamp") or "").strip()
+            if stamp:
+                stamps.append(stamp)
+    except Exception:
+        stamps = []
+
+    # Gather run ids so we can delete run detail keys.
+    run_ids: List[str] = []
+    try:
+        run_ids = [str(x) for x in (await r.lrange(_runs_key(mid), 0, -1)) if x]
+    except Exception:
+        run_ids = []
+
+    pipe = r.pipeline()
+    for stamp in stamps:
+        pipe.delete(_run_by_stamp_key(mid, stamp))
+    for rid in run_ids:
+        pipe.delete(_run_key(rid))
+
+    pipe.delete(_snapshots_key(mid))
+    pipe.delete(_runs_key(mid))
+
+    deleted_counts = await pipe.execute()
+    deleted = 0
+    for v in deleted_counts:
+        try:
+            deleted += int(v or 0)
+        except Exception:
+            continue
+
+    return {
+        "deleted": deleted,
+        "stamps": len(stamps),
+        "runs": len(run_ids),
+    }

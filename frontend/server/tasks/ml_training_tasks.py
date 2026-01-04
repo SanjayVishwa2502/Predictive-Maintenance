@@ -677,9 +677,12 @@ def _train_anomaly_impl(
             model_type=model_type,
             started_at=started_at,
         )
-        _validate_has_synthetic_data(machine_id)
-
-        script = PROJECT_ROOT / "ml_models" / "scripts" / "training" / "train_anomaly_comprehensive.py"
+        # Printers use real CSV telemetry, not GAN synthetic parquet.
+        if str(machine_id).startswith("printer_"):
+            script = PROJECT_ROOT / "ml_models" / "scripts" / "training" / "train_anomaly_printer.py"
+        else:
+            _validate_has_synthetic_data(machine_id)
+            script = PROJECT_ROOT / "ml_models" / "scripts" / "training" / "train_anomaly_comprehensive.py"
         if not script.exists():
             raise FileNotFoundError(f"Training script not found: {script.as_posix()}")
 

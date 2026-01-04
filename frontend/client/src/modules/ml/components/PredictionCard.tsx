@@ -25,7 +25,9 @@ import {
   Divider,
   Stack,
   CircularProgress,
+  Tooltip,
 } from '@mui/material';
+import { alpha, useTheme } from '@mui/material/styles';
 import {
   PlayArrow as PlayArrowIcon,
   Psychology as PsychologyIcon,
@@ -35,9 +37,12 @@ import {
   Error as ErrorIcon,
   AccessTime as AccessTimeIcon,
   Refresh as RefreshIcon,
+  AutoAwesome as AutoAwesomeIcon,
 } from '@mui/icons-material';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { useState, useEffect, useMemo } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 // ============================================================================
 // TYPESCRIPT INTERFACES
@@ -52,6 +57,10 @@ export interface PredictionCardProps {
   onViewHistory?: () => void;
   autoRefresh?: boolean;
   refreshInterval?: number; // seconds
+
+  // Role-based access control
+  userRole?: 'admin' | 'operator' | 'viewer';
+  isApproved?: boolean; // For operators pending approval
 
   // Optional: text-output mode (LLM explanation summary)
   // If provided, the card will render this text output panel instead of the full prediction/status UI.
@@ -206,12 +215,23 @@ export default function PredictionCard({
   onViewHistory,
   autoRefresh = false,
   refreshInterval = 30,
+  userRole,
+  isApproved = true,
   textOutput,
   textOutputLoading,
   textOutputError,
   textOutputRefreshSeconds,
 }: PredictionCardProps) {
+  const theme = useTheme();
   const [countdown, setCountdown] = useState(refreshInterval);
+
+  // Determine if user can run predictions (admin/approved operator only)
+  const canRunPrediction = userRole === 'admin' || (userRole === 'operator' && isApproved);
+  const predictionDisabledReason = !canRunPrediction
+    ? userRole === 'viewer'
+      ? 'Viewers cannot run predictions. Contact an administrator to upgrade your role.'
+      : 'Your operator account is pending approval. You will be able to run predictions once approved.'
+    : undefined;
 
   const isTextMode =
     typeof textOutput !== 'undefined' ||
@@ -222,6 +242,246 @@ export default function PredictionCard({
   if (isTextMode) {
     const displayText = (textOutput || '').trim();
     const isBusy = Boolean(textOutputLoading);
+
+    type ParsedLlmSections = {
+      overall?: string;
+      topCauses: string[];
+      immediateActions: string[];
+      next7Days: string[];
+      safety?: string;
+      other: string[];
+    };
+
+    const parseRunDetailsText = (raw: string) => {
+      const lines = String(raw || '')
+        .replaceAll('\r\n', '\n')
+        .split('\n')
+        .map((l) => l.trimEnd());
+
+      const meta: Record<string, string> = {};
+      const sensorLines: string[] = [];
+      let i = 0;
+      let inSensorBlock = false;
+      for (; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) {
+          if (inSensorBlock) inSensorBlock = false;
+          continue;
+        }
+        if (line === '[LLM]' || line === '[Predictions]' || line === 'Notes') break;
+        
+        // Parse metadata lines
+        const m = line.match(/^(Stamp|Machine|LLM):\s*(.*)$/i);
+        if (m) {
+          meta[m[1].toLowerCase()] = (m[2] || '').trim();
+          continue;
+        }
+        
+        // Parse sensor block
+        if (line.startsWith('Sensors at run time:')) {
+          inSensorBlock = true;
+          continue;
+        }
+        if (inSensorBlock && line.startsWith('  ')) {
+          sensorLines.push(line.trim());
+          continue;
+        }
+      }
+
+      // Collect LLM block + predictions block
+      let llmBlock: string[] = [];
+      let predictionsBlock: string[] = [];
+      let mode: 'none' | 'llm' | 'pred' = 'none';
+
+      for (; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (line === '[LLM]' || line === 'Notes') {
+          mode = 'llm';
+          continue;
+        }
+        if (line === '[Predictions]') {
+          mode = 'pred';
+          continue;
+        }
+        if (!line && mode === 'none') continue;
+        if (mode === 'llm') llmBlock.push(lines[i]);
+        if (mode === 'pred') predictionsBlock.push(lines[i]);
+      }
+
+      const llmRaw = llmBlock.join('\n').trim();
+      const predLines = predictionsBlock
+        .map((l) => l.trim())
+        .filter((l) => Boolean(l));
+
+      const sections: ParsedLlmSections = {
+        topCauses: [],
+        immediateActions: [],
+        next7Days: [],
+        other: [],
+      };
+
+      let current: keyof Pick<ParsedLlmSections, 'topCauses' | 'immediateActions' | 'next7Days'> | null = null;
+      const llmLines = llmRaw.split('\n').map((l) => l.trim());
+      for (const line of llmLines) {
+        const l = line.trim();
+        if (!l) continue;
+
+        const overall = l.match(/^Overall:\s*(.*)$/i);
+        if (overall) {
+          sections.overall = (overall[1] || '').trim();
+          current = null;
+          continue;
+        }
+        if (/^Top causes:\s*$/i.test(l)) {
+          current = 'topCauses';
+          continue;
+        }
+        if (/^Immediate actions:\s*$/i.test(l)) {
+          current = 'immediateActions';
+          continue;
+        }
+        if (/^Next 7 days:\s*$/i.test(l)) {
+          current = 'next7Days';
+          continue;
+        }
+        const safety = l.match(/^Safety:\s*(.*)$/i);
+        if (safety) {
+          sections.safety = (safety[1] || '').trim();
+          current = null;
+          continue;
+        }
+
+        const bullet = l.match(/^[-*]\s+(.*)$/);
+        if (bullet && current) {
+          (sections[current] as string[]).push((bullet[1] || '').trim());
+          continue;
+        }
+
+        // Unstructured line
+        sections.other.push(l);
+      }
+
+      const overallText = (sections.overall || '').toLowerCase();
+      const lowRisk = overallText.includes('low risk') || overallText.includes('operating normally') || overallText.includes('normal');
+      const noCauses = sections.topCauses.some((c) => c.toLowerCase().includes('none detected')) || sections.topCauses.length === 0;
+      const actionsLabel = lowRisk && noCauses ? 'Preventive actions' : 'Immediate actions';
+
+      return {
+        meta: {
+          machine: meta['machine'] || '',
+          dataStamp: meta['stamp'] || meta['data stamp'] || '',
+          compute: meta['llm'] || meta['llm compute'] || '',
+        },
+        sensors: sensorLines,
+        llm: sections,
+        actionsLabel,
+        lowRisk,
+        predictionLines: predLines,
+        rawLlm: llmRaw,
+      };
+    };
+
+    const parsed = useMemo(() => parseRunDetailsText(displayText), [displayText]);
+
+    // Detect if this is a placeholder message (no actual LLM output)
+    const isPlaceholderMessage = useMemo(() => {
+      const txt = (parsed?.rawLlm || '').trim().toLowerCase();
+      return (
+        txt.includes('prediction-only run') ||
+        txt.includes('pending') ||
+        txt.includes('not been requested') ||
+        txt.includes('not available') ||
+        txt.startsWith('[') // Square bracket messages are placeholders
+      );
+    }, [parsed?.rawLlm]);
+
+    const renderLlmAsMarkdown = useMemo(() => {
+      const txt = (parsed?.rawLlm || '').trim();
+      if (!txt || isPlaceholderMessage) return false;
+      // Render as markdown when we see typical markdown structures.
+      // (We do NOT enable raw HTML.)
+      return (
+        /(^|\n)\s*#{1,6}\s+/.test(txt) ||
+        /(^|\n)\s*---\s*$/.test(txt) ||
+        /\|\s*:?-{3,}:?\s*\|/.test(txt) ||
+        /(^|\n)\s*\*\*.+\*\*\s*:/.test(txt)
+      );
+    }, [parsed?.rawLlm, isPlaceholderMessage]);
+
+    const riskChip = (() => {
+      if (!parsed?.llm?.overall) return null;
+      const t = parsed.llm.overall.toLowerCase();
+      if (t.includes('critical')) return { label: 'CRITICAL', color: 'error' as const };
+      if (t.includes('high risk')) return { label: 'HIGH RISK', color: 'warning' as const };
+      if (t.includes('medium risk')) return { label: 'MEDIUM RISK', color: 'info' as const };
+      if (t.includes('low risk') || t.includes('operating normally') || t.includes('normal')) return { label: 'LOW RISK', color: 'success' as const };
+      return { label: 'STATUS', color: 'default' as const };
+    })();
+
+    type PredictionSectionKey = 'classification' | 'rul' | 'anomaly' | 'forecast' | 'other';
+    type PredictionSection = { key: PredictionSectionKey; title: string; lines: string[] };
+
+    const predictionSections = useMemo<PredictionSection[]>(() => {
+      const lines = (parsed?.predictionLines || []).map((l) => String(l || '').trim()).filter(Boolean);
+      if (!lines.length) return [];
+
+      const titleToKey: Record<string, { key: PredictionSectionKey; title: string }> = {
+        classification: { key: 'classification', title: 'Classification' },
+        rul: { key: 'rul', title: 'RUL' },
+        anomaly: { key: 'anomaly', title: 'Anomaly' },
+        forecast: { key: 'forecast', title: 'Forecast' },
+      };
+
+      const sections: PredictionSection[] = [];
+      let current: PredictionSection | null = null;
+
+      for (const line of lines) {
+        const token = line.toLowerCase();
+        const hit = titleToKey[token];
+        if (hit) {
+          current = { key: hit.key, title: hit.title, lines: [] };
+          sections.push(current);
+          continue;
+        }
+        if (!current) {
+          current = { key: 'other', title: 'Predictions', lines: [] };
+          sections.push(current);
+        }
+        current.lines.push(line);
+      }
+
+      // Keep a stable, formal order when present
+      const order: PredictionSectionKey[] = ['classification', 'rul', 'anomaly', 'forecast', 'other'];
+      return sections.sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
+    }, [parsed?.predictionLines]);
+
+    const renderPredictionSectionHeader = (section: PredictionSection) => {
+      const first = (section.lines[0] || '').toLowerCase();
+
+      if (section.key === 'classification') {
+        const status = (section.lines[0] || '').split('|')[0]?.trim() || '';
+        const statusLower = status.toLowerCase();
+        const chipColor =
+          statusLower.includes('normal') || statusLower.includes('healthy')
+            ? ('success' as const)
+            : statusLower.includes('critical')
+              ? ('error' as const)
+              : ('warning' as const);
+        return status ? <Chip size="small" label={status.toUpperCase()} color={chipColor} /> : null;
+      }
+
+      if (section.key === 'anomaly') {
+        const isAnomaly = first.includes('is_anomaly=true') || first.includes('is_anomaly=1');
+        return <Chip size="small" label={isAnomaly ? 'ANOMALY' : 'NORMAL'} color={isAnomaly ? 'error' : 'success'} />;
+      }
+
+      if (section.key === 'rul') {
+        const na = first.includes('n/a') || first.includes('no rul model');
+        return <Chip size="small" label={na ? 'N/A' : 'AVAILABLE'} color={na ? 'default' : 'info'} />;
+      }
+
+      return null;
+    };
 
     const handleCopy = async () => {
       const txt = displayText;
@@ -258,7 +518,7 @@ export default function PredictionCard({
           title={
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
               <Typography variant="h6" sx={{ color: '#e5e7eb', fontWeight: 600 }}>
-                Prediction Output
+                Run Details
               </Typography>
               <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
                 <Button
@@ -271,24 +531,119 @@ export default function PredictionCard({
                 >
                   Copy
                 </Button>
-                {!isBusy && !Boolean(loading) && (
+                {isBusy ? (
                   <Button
                     size="small"
                     variant="contained"
-                    startIcon={<PlayArrowIcon />}
-                    onClick={onRunPrediction}
-                    sx={{ textTransform: 'none' }}
+                    disabled
+                    startIcon={
+                      <CircularProgress
+                        size={16}
+                        thickness={4}
+                        sx={{ color: 'rgba(255, 255, 255, 0.6)' }}
+                      />
+                    }
+                    sx={{
+                      textTransform: 'none',
+                      bgcolor: 'rgba(102, 126, 234, 0.5)',
+                      '&.Mui-disabled': {
+                        bgcolor: 'rgba(102, 126, 234, 0.4)',
+                        color: 'rgba(255, 255, 255, 0.7)',
+                      },
+                    }}
                   >
-                    Prediction
+                    Generating…
                   </Button>
-                )}
+                ) : !Boolean(loading) ? (
+                  <Tooltip title={predictionDisabledReason || ''} arrow>
+                    <span>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        startIcon={<PlayArrowIcon />}
+                        onClick={onRunPrediction}
+                        disabled={!canRunPrediction}
+                        sx={{
+                          textTransform: 'none',
+                          background: canRunPrediction
+                            ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+                            : 'rgba(107, 114, 128, 0.3)',
+                          '&.Mui-disabled': {
+                            color: 'rgba(255, 255, 255, 0.4)',
+                          },
+                        }}
+                      >
+                        Prediction
+                      </Button>
+                    </span>
+                  </Tooltip>
+                ) : null}
               </Box>
             </Box>
           }
           subheader={
-            <Typography variant="caption" sx={{ color: '#9ca3af' }}>
-              Machine: {machineId}
-            </Typography>
+            <Stack direction="row" spacing={1} sx={{ mt: 0.5, flexWrap: 'wrap', alignItems: 'center' }}>
+              <Chip
+                size="small"
+                label={`Machine: ${parsed?.meta?.machine || machineId}`}
+                sx={{ bgcolor: 'rgba(255, 255, 255, 0.06)', color: '#e5e7eb' }}
+              />
+              {isBusy ? (
+                <Chip
+                  size="small"
+                  icon={
+                    <CircularProgress
+                      size={12}
+                      thickness={4}
+                      sx={{ color: '#a5b4fc', ml: 0.5 }}
+                    />
+                  }
+                  label="AI Generating"
+                  sx={{
+                    bgcolor: 'rgba(102, 126, 234, 0.25)',
+                    color: '#a5b4fc',
+                    fontWeight: 600,
+                    animation: 'pulse 2s ease-in-out infinite',
+                    '@keyframes pulse': {
+                      '0%, 100%': { opacity: 1 },
+                      '50%': { opacity: 0.7 },
+                    },
+                  }}
+                />
+              ) : null}
+              {parsed?.meta?.dataStamp ? (
+                <Chip
+                  size="small"
+                  label={`Stamp: ${parsed.meta.dataStamp}`}
+                  sx={{ bgcolor: 'rgba(255, 255, 255, 0.06)', color: '#e5e7eb' }}
+                />
+              ) : null}
+              {parsed?.meta?.compute ? (
+                <Chip
+                  size="small"
+                  label={`LLM: ${parsed.meta.compute}`}
+                  sx={{ bgcolor: 'rgba(255, 255, 255, 0.06)', color: '#e5e7eb' }}
+                />
+              ) : null}
+              {riskChip ? (
+                <Chip
+                  size="small"
+                  label={riskChip.label}
+                  color={riskChip.color}
+                  sx={{ fontWeight: 700 }}
+                />
+              ) : null}
+              {parsed?.sensors?.length > 0 ? (
+                parsed.sensors.map((sensor, idx) => (
+                  <Chip
+                    key={idx}
+                    size="small"
+                    label={sensor}
+                    sx={{ bgcolor: 'rgba(59, 130, 246, 0.15)', color: '#93c5fd', fontFamily: 'monospace', fontSize: '0.75rem' }}
+                  />
+                ))
+              ) : null}
+            </Stack>
           }
           sx={{
             '& .MuiCardHeader-content': { overflow: 'hidden' },
@@ -302,21 +657,340 @@ export default function PredictionCard({
             </Typography>
           )}
 
-          <Box
-            sx={{
-              minHeight: 220,
-              p: 2,
-              borderRadius: 2,
-              bgcolor: 'rgba(0, 0, 0, 0.2)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-              overflow: 'auto',
-              whiteSpace: 'pre-wrap',
-              color: '#e5e7eb',
-              fontSize: 14,
-              lineHeight: 1.6,
-            }}
-          >
-            {isBusy ? 'Generating explanation…' : displayText || 'Waiting for explanation…'}
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1.15fr 0.85fr' }, gap: 2 }}>
+            <Box
+              sx={{
+                minHeight: 220,
+                p: 2,
+                borderRadius: 2,
+                bgcolor: 'rgba(0, 0, 0, 0.2)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                overflow: 'auto',
+                color: '#e5e7eb',
+                fontSize: 14,
+                lineHeight: 1.6,
+              }}
+            >
+              {isBusy ? (
+                <Box
+                  sx={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    minHeight: 180,
+                    gap: 2,
+                  }}
+                >
+                  <Box
+                    sx={{
+                      position: 'relative',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <CircularProgress
+                      size={56}
+                      thickness={3}
+                      sx={{
+                        color: '#667eea',
+                        animation: 'pulse 2s ease-in-out infinite',
+                        '@keyframes pulse': {
+                          '0%, 100%': { opacity: 1 },
+                          '50%': { opacity: 0.6 },
+                        },
+                      }}
+                    />
+                    <AutoAwesomeIcon
+                      sx={{
+                        position: 'absolute',
+                        fontSize: 24,
+                        color: '#a5b4fc',
+                        animation: 'sparkle 1.5s ease-in-out infinite',
+                        '@keyframes sparkle': {
+                          '0%, 100%': { transform: 'scale(1)', opacity: 1 },
+                          '50%': { transform: 'scale(1.2)', opacity: 0.7 },
+                        },
+                      }}
+                    />
+                  </Box>
+                  <Box sx={{ textAlign: 'center' }}>
+                    <Typography
+                      variant="body1"
+                      sx={{
+                        color: '#e5e7eb',
+                        fontWeight: 600,
+                        mb: 0.5,
+                      }}
+                    >
+                      Generating AI Explanation
+                    </Typography>
+                    <Typography
+                      variant="caption"
+                      sx={{
+                        color: '#9ca3af',
+                        display: 'block',
+                      }}
+                    >
+                      The LLM is analyzing your sensor data…
+                    </Typography>
+                  </Box>
+                  <LinearProgress
+                    sx={{
+                      width: '60%',
+                      height: 4,
+                      borderRadius: 2,
+                      backgroundColor: 'rgba(102, 126, 234, 0.2)',
+                      '& .MuiLinearProgress-bar': {
+                        backgroundColor: '#667eea',
+                        borderRadius: 2,
+                      },
+                    }}
+                  />
+                </Box>
+              ) : parsed?.rawLlm && !isPlaceholderMessage ? (
+                renderLlmAsMarkdown ? (
+                  <Box
+                    sx={{
+                      '& h1, & h2, & h3': { margin: '0.25rem 0 0.25rem', fontWeight: 700 },
+                      '& p': { margin: '0.35rem 0' },
+                      '& hr': { border: 0, borderTop: '1px solid rgba(255, 255, 255, 0.12)', margin: '0.75rem 0' },
+                      '& ul': { margin: 0, paddingLeft: '1.25rem' },
+                      '& li': { margin: '0.15rem 0' },
+                      '& table': {
+                        width: '100%',
+                        borderCollapse: 'collapse',
+                        marginTop: '0.5rem',
+                        marginBottom: '0.75rem',
+                        fontSize: '0.875rem',
+                      },
+                      '& th, & td': {
+                        border: '1px solid rgba(255, 255, 255, 0.10)',
+                        padding: '6px 8px',
+                        verticalAlign: 'top',
+                      },
+                      '& th': { backgroundColor: 'rgba(255, 255, 255, 0.04)', color: '#e5e7eb', textAlign: 'left' },
+                      '& code': { fontFamily: 'monospace', fontSize: '0.85em' },
+                    }}
+                  >
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{parsed.rawLlm}</ReactMarkdown>
+                  </Box>
+                ) : (
+                  <Stack spacing={2}>
+                    {/* OVERALL */}
+                    {parsed.llm.overall ? (
+                      <Box>
+                        <Typography variant="overline" sx={{ color: '#9ca3af' }}>
+                          Overall
+                        </Typography>
+                        <Typography variant="body1" sx={{ color: '#e5e7eb', fontWeight: 600, mt: 0.5 }}>
+                          {parsed.llm.overall}
+                        </Typography>
+                      </Box>
+                    ) : null}
+
+                  {/* TOP CAUSES */}
+                  {parsed.llm.topCauses.length > 0 ? (
+                    <Box>
+                      <Typography variant="overline" sx={{ color: '#9ca3af' }}>
+                        Top causes
+                      </Typography>
+                      <Box component="ul" sx={{ m: 0, mt: 0.75, pl: 2.5 }}>
+                        {parsed.llm.topCauses.map((c, idx) => (
+                          <Typography
+                            key={idx}
+                            component="li"
+                            variant="body2"
+                            sx={{ color: '#e5e7eb', mb: 0.5, '&::marker': { color: '#9ca3af' } }}
+                          >
+                            {c}
+                          </Typography>
+                        ))}
+                      </Box>
+                    </Box>
+                  ) : null}
+
+                  {/* ACTIONS */}
+                  {parsed.llm.immediateActions.length > 0 ? (
+                    <Box>
+                      <Typography variant="overline" sx={{ color: '#9ca3af' }}>
+                        {parsed.actionsLabel}
+                      </Typography>
+                      <Box component="ul" sx={{ m: 0, mt: 0.75, pl: 2.5 }}>
+                        {parsed.llm.immediateActions.map((a, idx) => (
+                          <Typography
+                            key={idx}
+                            component="li"
+                            variant="body2"
+                            sx={{ color: '#e5e7eb', mb: 0.5, '&::marker': { color: '#9ca3af' } }}
+                          >
+                            {a}
+                          </Typography>
+                        ))}
+                      </Box>
+                    </Box>
+                  ) : null}
+
+                  {/* NEXT 7 DAYS */}
+                  {parsed.llm.next7Days.length > 0 ? (
+                    <Box>
+                      <Typography variant="overline" sx={{ color: '#9ca3af' }}>
+                        Next 7 days
+                      </Typography>
+                      <Box component="ul" sx={{ m: 0, mt: 0.75, pl: 2.5 }}>
+                        {parsed.llm.next7Days.map((a, idx) => (
+                          <Typography
+                            key={idx}
+                            component="li"
+                            variant="body2"
+                            sx={{ color: '#e5e7eb', mb: 0.5, '&::marker': { color: '#9ca3af' } }}
+                          >
+                            {a}
+                          </Typography>
+                        ))}
+                      </Box>
+                    </Box>
+                  ) : null}
+
+                  {/* SAFETY */}
+                  {parsed.llm.safety ? (
+                    <Box>
+                      <Typography variant="overline" sx={{ color: '#9ca3af' }}>
+                        Safety
+                      </Typography>
+                      <Typography variant="body2" sx={{ color: '#e5e7eb', mt: 0.75 }}>
+                        {parsed.llm.safety}
+                      </Typography>
+                    </Box>
+                  ) : null}
+
+                    {/* NOTES */}
+                    {parsed.llm.other.length > 0 ? (
+                      <Box>
+                        <Typography variant="overline" sx={{ color: '#9ca3af' }}>
+                          Notes
+                        </Typography>
+                        <Typography variant="body2" sx={{ color: '#e5e7eb', mt: 0.75, whiteSpace: 'pre-wrap' }}>
+                          {parsed.llm.other.join('\n')}
+                        </Typography>
+                      </Box>
+                    ) : null}
+                  </Stack>
+                )
+              ) : (
+                <Box
+                  sx={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    minHeight: 180,
+                    gap: 2,
+                  }}
+                >
+                  {/* Check if this is a prediction-only run or no data at all */}
+                  {parsed?.rawLlm?.toLowerCase().includes('prediction-only') ? (
+                    <>
+                      <Box
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          width: 64,
+                          height: 64,
+                          borderRadius: '50%',
+                          bgcolor: 'rgba(59, 130, 246, 0.1)',
+                          border: '2px solid rgba(59, 130, 246, 0.3)',
+                        }}
+                      >
+                        <CheckCircleIcon sx={{ fontSize: 32, color: '#3b82f6' }} />
+                      </Box>
+                      <Box sx={{ textAlign: 'center' }}>
+                        <Typography variant="body1" sx={{ color: '#e5e7eb', fontWeight: 600 }}>
+                          Prediction Complete
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: '#9ca3af', display: 'block', mt: 0.5 }}>
+                          ML models analyzed successfully. Click "Prediction" to generate AI explanation.
+                        </Typography>
+                      </Box>
+                    </>
+                  ) : (
+                    <>
+                      <PsychologyIcon sx={{ fontSize: 48, color: '#6b7280', opacity: 0.7 }} />
+                      <Box sx={{ textAlign: 'center' }}>
+                        <Typography variant="body1" sx={{ color: '#9ca3af', fontWeight: 500 }}>
+                          No Explanation Available
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: '#6b7280', display: 'block', mt: 0.5 }}>
+                          Click "Prediction" to run analysis and generate an AI explanation
+                        </Typography>
+                      </Box>
+                    </>
+                  )}
+                </Box>
+              )}
+            </Box>
+
+            <Box
+              sx={{
+                minHeight: 220,
+                p: 2,
+                borderRadius: 2,
+                bgcolor: alpha(theme.palette.background.paper, 0.06),
+                border: `1px solid ${alpha(theme.palette.divider, 0.25)}`,
+                overflow: 'auto',
+                color: '#e5e7eb',
+              }}
+            >
+              <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1 }}>
+                Predictions
+              </Typography>
+              {predictionSections.length ? (
+                <Stack spacing={1.25}>
+                  {predictionSections.map((section, sectionIdx) => (
+                    <Box key={section.key}>
+                      <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
+                        <Typography variant="subtitle2" sx={{ color: '#e5e7eb', fontWeight: 700 }}>
+                          {section.title}
+                        </Typography>
+                        {renderPredictionSectionHeader(section)}
+                      </Stack>
+                      <Stack spacing={0.75} sx={{ mt: 0.75 }}>
+                        {section.lines.length ? (
+                          section.lines.map((line, idx) => (
+                            <Typography
+                              key={idx}
+                              variant="body2"
+                              sx={{
+                                color: '#e5e7eb',
+                                whiteSpace: 'pre-wrap',
+                                fontFamily:
+                                  'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                                fontSize: '0.85rem',
+                              }}
+                            >
+                              {line}
+                            </Typography>
+                          ))
+                        ) : (
+                          <Typography variant="body2" sx={{ color: '#9ca3af' }}>
+                            No data.
+                          </Typography>
+                        )}
+                      </Stack>
+                      {sectionIdx < predictionSections.length - 1 ? (
+                        <Divider sx={{ my: 1.25, borderColor: alpha(theme.palette.divider, 0.25) }} />
+                      ) : null}
+                    </Box>
+                  ))}
+                </Stack>
+              ) : (
+                <Typography variant="body2" sx={{ color: '#9ca3af' }}>
+                  No predictions available.
+                </Typography>
+              )}
+            </Box>
           </Box>
         </CardContent>
       </Card>
@@ -406,23 +1080,37 @@ export default function PredictionCard({
               No prediction yet
             </Typography>
             <Typography variant="body2" sx={{ color: '#6b7280', textAlign: 'center', maxWidth: 400 }}>
-              Click the button below to run a health prediction for this machine using the latest sensor data.
+              {canRunPrediction
+                ? 'Click the button below to run a health prediction for this machine using the latest sensor data.'
+                : predictionDisabledReason}
             </Typography>
-            <Button
-              variant="contained"
-              size="large"
-              startIcon={<PlayArrowIcon />}
-              onClick={onRunPrediction}
-              sx={{
-                mt: 2,
-                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                '&:hover': {
-                  background: 'linear-gradient(135deg, #5568d3 0%, #63408b 100%)',
-                },
-              }}
-            >
-              Run Prediction
-            </Button>
+            <Tooltip title={predictionDisabledReason || ''} arrow>
+              <span>
+                <Button
+                  variant="contained"
+                  size="large"
+                  startIcon={<PlayArrowIcon />}
+                  onClick={onRunPrediction}
+                  disabled={!canRunPrediction}
+                  sx={{
+                    mt: 2,
+                    background: canRunPrediction
+                      ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+                      : 'rgba(107, 114, 128, 0.3)',
+                    '&:hover': {
+                      background: canRunPrediction
+                        ? 'linear-gradient(135deg, #5568d3 0%, #63408b 100%)'
+                        : 'rgba(107, 114, 128, 0.3)',
+                    },
+                    '&.Mui-disabled': {
+                      color: 'rgba(255, 255, 255, 0.4)',
+                    },
+                  }}
+                >
+                  Run Prediction
+                </Button>
+              </span>
+            </Tooltip>
           </Box>
         </CardContent>
       </Card>
@@ -511,20 +1199,32 @@ export default function PredictionCard({
           </Stack>
         }
         action={
-          <Button
-            variant="contained"
-            size="small"
-            startIcon={<PlayArrowIcon />}
-            onClick={onRunPrediction}
-            sx={{
-              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-              '&:hover': {
-                background: 'linear-gradient(135deg, #5568d3 0%, #63408b 100%)',
-              },
-            }}
-          >
-            Run Prediction
-          </Button>
+          <Tooltip title={predictionDisabledReason || ''} arrow>
+            <span>
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<PlayArrowIcon />}
+                onClick={onRunPrediction}
+                disabled={!canRunPrediction}
+                sx={{
+                  background: canRunPrediction
+                    ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+                    : 'rgba(107, 114, 128, 0.3)',
+                  '&:hover': {
+                    background: canRunPrediction
+                      ? 'linear-gradient(135deg, #5568d3 0%, #63408b 100%)'
+                      : 'rgba(107, 114, 128, 0.3)',
+                  },
+                  '&.Mui-disabled': {
+                    color: 'rgba(255, 255, 255, 0.4)',
+                  },
+                }}
+              >
+                Run Prediction
+              </Button>
+            </span>
+          </Tooltip>
         }
       />
       <Divider sx={{ borderColor: 'rgba(255, 255, 255, 0.1)' }} />

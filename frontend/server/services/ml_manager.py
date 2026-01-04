@@ -157,7 +157,11 @@ class MLManager:
         """Load IntegratedPredictionSystem (LLM + ML models)"""
         try:
             from LLM.api.ml_integration import IntegratedPredictionSystem
-            self.integrated_system = IntegratedPredictionSystem()
+            # IMPORTANT: The request path should remain ML-only.
+            # Loading the LLM/RAG explainer here dramatically increases startup time
+            # and can fail on some machines (GPU/driver/DLL issues). Explanations are
+            # generated asynchronously via the LLM worker.
+            self.integrated_system = IntegratedPredictionSystem(load_llm=False)
             logger.info("[OK] IntegratedPredictionSystem loaded successfully")
         except Exception as e:
             logger.warning(f"[WARN] Failed to load IntegratedPredictionSystem: {e}")
@@ -587,7 +591,7 @@ class MLManager:
     def predict_anomaly(
         self,
         machine_id: str,
-        sensor_data: Optional[Dict[str, float]],
+        sensor_data: Optional[Dict[str, Any]],
     ) -> AnomalyResult:
         """Run anomaly detection (prediction-only)."""
         if self.integrated_system is None:
@@ -625,7 +629,7 @@ class MLManager:
     def predict_timeseries(
         self,
         machine_id: str,
-        sensor_data: Optional[Dict[str, float]],
+        sensor_data: Optional[Any],
     ) -> TimeSeriesResult:
         """Run time-series forecast (prediction-only)."""
         if self.integrated_system is None:
@@ -668,6 +672,7 @@ class MLManager:
             Dictionary with service health information
         """
         integrated_ready = self.integrated_system is not None
+        llm_loaded = bool(getattr(self.integrated_system, "explainer", None)) if integrated_ready else False
         health: Dict[str, Any] = {
             'status': 'healthy' if integrated_ready else 'degraded',
             'models_loaded': {
@@ -676,7 +681,9 @@ class MLManager:
                 'anomaly': 0,
                 'timeseries': 0,
             },
-            'llm_status': 'available' if integrated_ready else 'unavailable',
+            # The request path loads IntegratedPredictionSystem in ML-only mode.
+            # LLM explanations are generated asynchronously by the LLM worker.
+            'llm_status': 'available' if llm_loaded else 'unavailable',
             'gpu_available': False,
             'gpu_info': None,
             'integrated_system_ready': integrated_ready,

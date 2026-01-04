@@ -27,6 +27,9 @@ from prompts import (
     ANOMALY_DETECTION_PROMPT,
     TIMESERIES_FORECAST_PROMPT,
     COMBINED_RUN_PROMPT,
+    PRINTER_COMBINED_PROMPT,
+    get_combined_prompt_for_machine,
+    get_status_section,
 )
 
 
@@ -64,7 +67,7 @@ class MLExplainer:
     def _max_tokens(self, env_name: str, default: int) -> int:
         try:
             v = int(os.getenv(env_name, str(default)).strip())
-            return max(64, min(v, 512))
+            return max(64, min(v, 800))  # Increased cap for detailed responses
         except Exception:
             return default
 
@@ -131,7 +134,7 @@ class MLExplainer:
         explanation, inference_time, response_tokens, tokens_per_sec = self.llm.generate(
             SYSTEM_PROMPT,
             user_message,
-            max_tokens=self._max_tokens("PM_LLM_MAX_TOKENS_CLASSIFICATION", 200),
+            max_tokens=self._max_tokens("PM_LLM_MAX_TOKENS_CLASSIFICATION", 350),  # Increased for detailed responses
         )
         if self.verbose:
             print(f"  [OK] Generated {len(explanation.split())} words ({inference_time:.1f}s, {tokens_per_sec:.0f} tok/s)")
@@ -189,7 +192,7 @@ class MLExplainer:
         explanation, inference_time, response_tokens, tokens_per_sec = self.llm.generate(
             SYSTEM_PROMPT,
             user_message,
-            max_tokens=self._max_tokens("PM_LLM_MAX_TOKENS_RUL", 200),
+            max_tokens=self._max_tokens("PM_LLM_MAX_TOKENS_RUL", 350),
         )
         if self.verbose:
             print(f"  [OK] Generated {len(explanation.split())} words ({inference_time:.1f}s, {tokens_per_sec:.0f} tok/s)")
@@ -249,7 +252,7 @@ class MLExplainer:
         explanation, inference_time, response_tokens, tokens_per_sec = self.llm.generate(
             SYSTEM_PROMPT,
             user_message,
-            max_tokens=self._max_tokens("PM_LLM_MAX_TOKENS_ANOMALY", 200),
+            max_tokens=self._max_tokens("PM_LLM_MAX_TOKENS_ANOMALY", 350),
         )
         if self.verbose:
             print(f"  [OK] Generated {len(explanation.split())} words ({inference_time:.1f}s, {tokens_per_sec:.0f} tok/s)")
@@ -302,7 +305,7 @@ class MLExplainer:
         explanation, inference_time, response_tokens, tokens_per_sec = self.llm.generate(
             SYSTEM_PROMPT,
             user_message,
-            max_tokens=self._max_tokens("PM_LLM_MAX_TOKENS_TIMESERIES", 160),
+            max_tokens=self._max_tokens("PM_LLM_MAX_TOKENS_TIMESERIES", 350),
         )
         if self.verbose:
             print(f"  [OK] Generated {len(explanation.split())} words ({inference_time:.1f}s, {tokens_per_sec:.0f} tok/s)")
@@ -319,14 +322,19 @@ class MLExplainer:
         predictions: dict,
         sensor_data: dict,
         baseline_ranges: str | None = None,
+        data_stamp: str | None = None,
     ) -> dict:
         """Generate ONE combined explanation for a run.
 
         This is the main lever to reduce end-to-end latency on CPU: one LLM call per
         run rather than 3-4 separate ones.
+        
+        REDESIGNED: Now uses machine-specific prompts and properly formats sensor data
+        with actual values and thresholds for accurate, varied responses.
         """
         if self.verbose:
             print(f"\n[Combined] Generating explanation for {machine_id}...")
+            print(f"  Sensor data keys: {list((sensor_data or {}).keys())}")
 
         cls = (predictions or {}).get("classification") or {}
         rul = (predictions or {}).get("rul") or {}
@@ -343,51 +351,72 @@ class MLExplainer:
         if isinstance(ts, dict) and ts.get("error"):
             ts = {}
 
-        failure_type = cls.get("failure_type") or cls.get("predicted_failure_type") or "unknown"
-        # NOTE:
-        # - Our classifier returns `confidence` as P(predicted_label).
-        # - It returns `failure_probability` as (1 - P(normal)).
-        # In combined reporting we want the probability to align with the label.
+        failure_type = cls.get("failure_type") or cls.get("predicted_failure_type") or "normal"
         cls_conf = cls.get("confidence")
         classification_probability = cls_conf
-        failure_risk = cls.get("failure_probability")
+        failure_risk = cls.get("failure_probability") or 0.0
 
         rul_hours = rul.get("rul_hours")
         rul_conf = rul.get("confidence")
 
-        anomaly_score = ano.get("anomaly_score")
-        detection_method = ano.get("detection_method") or "unavailable"
+        anomaly_score = ano.get("anomaly_score") or 0.0
+        detection_method = ano.get("detection_method") or "Isolation Forest"
 
-        forecast_summary = ts.get("forecast_summary") or ts.get("summary") or "(no forecast summary)"
+        forecast_summary = ts.get("forecast_summary") or ts.get("summary") or "(no forecast available)"
 
         # Retrieve relevant context once
         query = f"maintenance summary for {machine_id}"
         rag_results, _elapsed_ms = self.retriever.retrieve(query, machine_id, top_k=2)
-        rag_context = "\n\n".join([r['doc'][:400] for r in rag_results])
+        rag_context = "\n\n".join([r['doc'][:400] for r in rag_results]) or "No additional context available."
 
-        sensor_str = self._sensor_str(sensor_data)
+        # Format sensor data with actual values
+        sensor_str = self._format_sensor_data_detailed(sensor_data)
 
-        user_message = COMBINED_RUN_PROMPT.format(
-            machine_id=machine_id,
-            sensor_readings=sensor_str,
-            baseline_ranges=(baseline_ranges or "unavailable"),
-            failure_type=failure_type,
-            classification_probability=classification_probability,
-            failure_risk=failure_risk,
-            classification_confidence=cls_conf,
-            rul_hours=rul_hours,
-            rul_confidence=rul_conf,
-            anomaly_score=anomaly_score,
-            detection_method=detection_method,
-            forecast_summary=forecast_summary,
-            rag_context=rag_context,
-        )
+        # Determine status section based on risk levels
+        status_section = get_status_section(failure_risk, anomaly_score)
+
+        # Select the appropriate prompt template based on machine type
+        machine_lower = (machine_id or "").lower()
+        is_printer = "printer" in machine_lower or "ender" in machine_lower or "creality" in machine_lower
+
+        if is_printer:
+            # Use printer-specific prompt with actual temperature values
+            user_message = PRINTER_COMBINED_PROMPT.format(
+                machine_id=machine_id,
+                data_stamp=data_stamp or "current",
+                sensor_readings=sensor_str,
+                failure_type=failure_type,
+                failure_risk=f"{float(failure_risk):.2f}" if failure_risk else "0.00",
+                anomaly_score=f"{float(anomaly_score):.2f}" if anomaly_score else "0.00",
+                forecast_summary=forecast_summary,
+            )
+        else:
+            # Use general combined prompt
+            user_message = COMBINED_RUN_PROMPT.format(
+                machine_id=machine_id,
+                sensor_readings=sensor_str,
+                baseline_ranges=(baseline_ranges or "unavailable"),
+                failure_type=failure_type,
+                classification_probability=classification_probability,
+                failure_risk=failure_risk,
+                classification_confidence=cls_conf,
+                rul_hours=rul_hours,
+                rul_confidence=rul_conf,
+                anomaly_score=anomaly_score,
+                detection_method=detection_method,
+                forecast_summary=forecast_summary,
+                rag_context=rag_context,
+                status_section=status_section,
+            )
+
+        if self.verbose:
+            print(f"  Using {'PRINTER' if is_printer else 'GENERAL'} prompt template")
+            print(f"  Prompt length: {len(user_message)} chars")
 
         explanation, inference_time, _response_tokens, tokens_per_sec = self.llm.generate(
             SYSTEM_PROMPT,
             user_message,
-            # Slightly higher default to reduce truncation; prompt itself is constrained.
-            max_tokens=self._max_tokens("PM_LLM_MAX_TOKENS_COMBINED", 420),
+            max_tokens=self._max_tokens("PM_LLM_MAX_TOKENS_COMBINED", 450),  # Increased for 100-150 word responses
         )
         if self.verbose:
             print(f"  [OK] Combined explanation ({inference_time:.1f}s, {tokens_per_sec:.0f} tok/s)")
@@ -397,6 +426,45 @@ class MLExplainer:
             "sources": [r['machine_id'] for r in rag_results],
             "confidence": cls_conf or rul_conf or 0.0,
         }
+
+    def _format_sensor_data_detailed(self, sensor_data: dict) -> str:
+        """Format sensor data with actual values for the LLM prompt.
+        
+        This ensures the LLM sees specific numbers it must use in its response.
+        """
+        if not sensor_data:
+            return "No sensor data available"
+        
+        lines = []
+        for key, value in list(sensor_data.items())[:20]:  # Limit to 20 sensors
+            # Skip non-numeric or internal fields
+            if key in ('timestamp', 'machine_id', 'label', 'health_state'):
+                continue
+            
+            try:
+                val = float(value)
+                # Format based on sensor type
+                if 'temp' in str(key).lower():
+                    lines.append(f"{key}: {val:.1f} C")
+                elif 'pressure' in str(key).lower():
+                    lines.append(f"{key}: {val:.2f} bar")
+                elif 'vibration' in str(key).lower():
+                    lines.append(f"{key}: {val:.2f} mm/s")
+                elif 'current' in str(key).lower():
+                    lines.append(f"{key}: {val:.2f} A")
+                elif 'voltage' in str(key).lower():
+                    lines.append(f"{key}: {val:.1f} V")
+                elif 'speed' in str(key).lower() or 'rpm' in str(key).lower():
+                    lines.append(f"{key}: {val:.0f} RPM")
+                elif 'flow' in str(key).lower():
+                    lines.append(f"{key}: {val:.2f} L/min")
+                else:
+                    lines.append(f"{key}: {val:.2f}")
+            except (ValueError, TypeError):
+                # Keep string values as-is
+                lines.append(f"{key}: {value}")
+        
+        return "\n".join(lines) if lines else "No numeric sensor data"
 
 
 # Test the MLExplainer

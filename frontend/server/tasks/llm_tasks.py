@@ -23,6 +23,45 @@ from services.wide_dataset_csv import append_llm_row
 from pathlib import Path
 
 
+def _load_run_context_best_effort(run_id: Any) -> Optional[Dict[str, Any]]:
+    """Best-effort load of a stored run record from Redis DB 3."""
+    rid = str(run_id or "").strip()
+    if not rid:
+        return None
+    try:
+        r = sync_redis.Redis(
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            db=3,
+            decode_responses=True,
+        )
+        raw = r.get(f"pm:run:{rid}")
+        if not raw:
+            return None
+        obj = json.loads(raw)
+        if isinstance(obj, dict) and obj.get("run_id"):
+            return obj
+    except Exception:
+        return None
+    return None
+
+
+def _clear_llm_busy_best_effort(machine_id: str) -> None:
+    mid = str(machine_id or "").strip()
+    if not mid:
+        return
+    try:
+        r = sync_redis.Redis(
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            db=settings.REDIS_CACHE_DB,
+            decode_responses=True,
+        )
+        r.delete(f"pm:llm_busy:{mid[:128]}")
+    except Exception:
+        return
+
+
 def _update_run_llm_best_effort(run_id: Any, use_case: str, summary: str, compute: str, task_id: str) -> None:
     """Best-effort persistence of LLM output into the run record (Redis DB 3)."""
     rid = str(run_id or "").strip()
@@ -255,6 +294,20 @@ def generate_explanation(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     abnormal_sensors = payload.get("abnormal_sensors") or {}
     detection_method = payload.get("detection_method")
 
+    # Canonical pipeline: if run_id is provided, always explain the stored run.
+    # This prevents ML/LLM mismatches due to stale UI state or partial payloads.
+    stored_run = _load_run_context_best_effort(run_id)
+    if stored_run:
+        try:
+            machine_id = str(stored_run.get("machine_id") or machine_id)
+            data_stamp = stored_run.get("data_stamp") or data_stamp
+            sensor_data = stored_run.get("sensor_data") or sensor_data or {}
+            # Use stored predictions (already compacted server-side).
+            payload = dict(payload)
+            payload["predictions"] = stored_run.get("predictions") or {}
+        except Exception:
+            pass
+
     forecast_summary = payload.get("forecast_summary")
     predictions = _coerce_predictions(payload)
 
@@ -305,6 +358,7 @@ def generate_explanation(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 predictions=predictions,
                 sensor_data=sensor_data,
                 baseline_ranges=_baseline_ranges_from_profile(machine_id, sensor_data),
+                data_stamp=data_stamp,
             )
 
         explanation_text = str(llm_out.get("explanation") or "")
@@ -381,6 +435,8 @@ def generate_explanation(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             payload={"use_case": use_case, "compute": result.get("compute"), "summary": result.get("summary")},
         )
 
+        _clear_llm_busy_best_effort(machine_id)
+
         return result
 
     except Exception as e:
@@ -430,4 +486,6 @@ def generate_explanation(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             task_id=celery_task_id,
             payload={"use_case": use_case, "compute": result.get("compute"), "summary": result.get("summary")},
         )
+
+        _clear_llm_busy_best_effort(machine_id)
         return result

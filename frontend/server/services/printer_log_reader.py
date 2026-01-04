@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 import csv
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict
 
@@ -92,16 +92,24 @@ def read_latest_printer_reading(machine_id: str) -> Optional[PrinterReading]:
 
 def reading_to_status_fields(reading: PrinterReading) -> dict:
     """Convert a PrinterReading into fields compatible with MachineStatusResponse."""
-    # Use the logged timestamp as a stable id. For UI/history purposes, we just need
-    # a stable unique-ish stamp; we avoid claiming timezone accuracy.
-    stamp = reading.timestamp
-    if stamp and not stamp.endswith("Z"):
-        stamp = f"{stamp}Z"
-
+    # Parse the timestamp from CSV (assumed to be local time without timezone)
+    # For API consistency, keep the local timestamp as-is with Z suffix
+    # The key is that the SAME timestamp appears in both data_stamp and for run lookups
     try:
-        last_update = datetime.fromisoformat(reading.timestamp)
+        local_dt = datetime.fromisoformat(reading.timestamp)
+        last_update = local_dt
+        # Keep the original timestamp for data_stamp (just add Z for format consistency)
+        stamp = reading.timestamp
+        if stamp and not stamp.endswith("Z"):
+            stamp = f"{stamp}Z"
+        # Calculate data age in seconds
+        data_age_seconds = (datetime.now() - local_dt).total_seconds()
     except Exception:
+        stamp = reading.timestamp
+        if stamp and not stamp.endswith("Z"):
+            stamp = f"{stamp}Z"
         last_update = datetime.now()
+        data_age_seconds = 0.0  # Unknown age, assume fresh
 
     return {
         "latest_sensors": reading.to_sensors(),
@@ -109,4 +117,5 @@ def reading_to_status_fields(reading: PrinterReading) -> dict:
         "data_stamp": stamp,
         "sensor_count": 2,
         "is_running": True,
+        "data_age_seconds": max(0.0, data_age_seconds),
     }

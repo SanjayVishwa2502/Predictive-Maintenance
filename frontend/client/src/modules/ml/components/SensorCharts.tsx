@@ -15,6 +15,7 @@
  */
 
 import { useState, useMemo, useRef, useEffect } from 'react';
+import { alpha } from '@mui/material/styles';
 import {
   Box,
   Card,
@@ -50,7 +51,6 @@ import {
   Tooltip as RechartsTooltip,
   Legend,
   ResponsiveContainer,
-  ReferenceLine,
 } from 'recharts';
 
 // ============================================================================
@@ -82,43 +82,9 @@ export interface SensorReading {
   values: Record<string, number>;
 }
 
-interface SensorThreshold {
-  warning: number;
-  critical: number;
-}
-
 // ============================================================================
-// SENSOR CATEGORIZATION & COLORS
+// SENSOR COLORS
 // ============================================================================
-
-const getSensorCategory = (sensorName: string): string => {
-  const lower = sensorName.toLowerCase();
-  if (lower.includes('temp') || lower.includes('temperature')) return 'temperature';
-  if (lower.includes('vibr') || lower.includes('velocity')) return 'vibration';
-  if (lower.includes('current') || lower.includes('amp')) return 'current';
-  if (lower.includes('voltage') || lower.includes('volt')) return 'voltage';
-  if (lower.includes('pressure') || lower.includes('psi')) return 'pressure';
-  if (lower.includes('speed') || lower.includes('rpm')) return 'speed';
-  return 'other';
-};
-
-const getCategoryColor = (category: string): string => {
-  const colors: Record<string, string> = {
-    temperature: '#ef4444', // Red
-    vibration: '#3b82f6',   // Blue
-    current: '#a855f7',     // Purple
-    voltage: '#10b981',     // Green
-    pressure: '#06b6d4',    // Cyan
-    speed: '#f59e0b',       // Orange
-    other: '#6b7280',       // Gray
-  };
-  return colors[category] || colors.other;
-};
-
-const getSensorColor = (sensorName: string): string => {
-  const category = getSensorCategory(sensorName);
-  return getCategoryColor(category);
-};
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -138,52 +104,6 @@ const formatTimestamp = (timestamp: Date): string => {
     second: '2-digit',
     hour12: false,
   }).format(timestamp);
-};
-
-const getDefaultThreshold = (sensorName: string): SensorThreshold | null => {
-  const lower = sensorName.toLowerCase();
-  
-  if (lower.includes('temp')) {
-    return { warning: 70, critical: 85 };
-  }
-  if (lower.includes('vibr') || lower.includes('velocity')) {
-    return { warning: 5, critical: 8 };
-  }
-  if (lower.includes('current')) {
-    return { warning: 15, critical: 20 };
-  }
-  if (lower.includes('pressure')) {
-    return { warning: 100, critical: 120 };
-  }
-  
-  return null;
-};
-
-const getBaselineThreshold = (
-  sensorName: string,
-  baselineRanges?: SensorChartsProps['baselineRanges']
-): SensorThreshold | null => {
-  if (!baselineRanges) return null;
-
-  const direct = baselineRanges[sensorName];
-  const lower = baselineRanges[sensorName.toLowerCase()];
-  const underscored = baselineRanges[sensorName.replace(/\s+/g, '_')];
-  const range = direct || lower || underscored;
-  if (!range) return null;
-
-  const toNum = (v: unknown): number | undefined => {
-    if (typeof v === 'number' && !isNaN(v)) return v;
-    return undefined;
-  };
-
-  const alarm = toNum(range.alarm) ?? toNum(range.max) ?? toNum(range.trip);
-  const trip = toNum(range.trip) ?? alarm;
-  if (alarm === undefined || trip === undefined) return null;
-
-  return {
-    warning: Math.min(alarm, trip),
-    critical: Math.max(alarm, trip),
-  };
 };
 
 const stripMachinePrefix = (machineId: string, sensorName: string): string => {
@@ -232,6 +152,23 @@ export default function SensorCharts({
   const [isPaused, setIsPaused] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
   const chartContainerRef = useRef<HTMLDivElement>(null);
+
+  // Distinct colors for up to 5 sensor lines (bright, high-contrast palette)
+  const seriesPalette = useMemo(
+    () => [
+      '#3b82f6', // Blue
+      '#10b981', // Emerald
+      '#f59e0b', // Amber
+      '#ef4444', // Red
+      '#8b5cf6', // Violet
+    ],
+    []
+  );
+
+  // Position-based color: first selected sensor -> color[0], second -> color[1], etc.
+  const getSensorColorByIndex = (index: number): string => {
+    return seriesPalette[index % seriesPalette.length] || seriesPalette[0];
+  };
 
   const isExternallyControlled =
     Array.isArray(externalSelectedSensors) && typeof onSensorToggle === 'function';
@@ -421,15 +358,15 @@ export default function SensorCharts({
             label="Select Sensors (Max 5)"
             renderValue={(selected) => (
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                {selected.map((value) => (
+                {selected.map((value, idx) => (
                   <Chip
                     key={value}
                     label={formatSensorName(value)}
                     size="small"
                     sx={{
-                      bgcolor: `${getSensorColor(value)}20`,
-                      color: getSensorColor(value),
-                      borderColor: getSensorColor(value),
+                      bgcolor: alpha(getSensorColorByIndex(idx), 0.16),
+                      color: getSensorColorByIndex(idx),
+                      borderColor: getSensorColorByIndex(idx),
                       border: '1px solid',
                     }}
                   />
@@ -437,27 +374,31 @@ export default function SensorCharts({
               </Box>
             )}
           >
-            {availableSensors.map((sensor) => (
-              <MenuItem
-                key={sensor}
-                value={sensor}
-                disabled={
-                  !selectedSensors.includes(sensor) && selectedSensors.length >= 5
-                }
-              >
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Box
-                    sx={{
-                      width: 12,
-                      height: 12,
-                      borderRadius: '50%',
-                      bgcolor: getSensorColor(sensor),
-                    }}
-                  />
-                  {formatSensorName(sensor)}
-                </Box>
-              </MenuItem>
-            ))}
+            {availableSensors.map((sensor) => {
+              const sensorIdx = selectedSensors.indexOf(sensor);
+              const dotColor = sensorIdx >= 0 ? getSensorColorByIndex(sensorIdx) : '#6b7280';
+              return (
+                <MenuItem
+                  key={sensor}
+                  value={sensor}
+                  disabled={
+                    !selectedSensors.includes(sensor) && selectedSensors.length >= 5
+                  }
+                >
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Box
+                      sx={{
+                        width: 12,
+                        height: 12,
+                        borderRadius: '50%',
+                        bgcolor: dotColor,
+                      }}
+                    />
+                    {formatSensorName(sensor)}
+                  </Box>
+                </MenuItem>
+              );
+            })}
           </Select>
         </FormControl>
 
@@ -597,45 +538,14 @@ export default function SensorCharts({
                 formatter={(value) => formatSensorName(value)}
               />
 
-              {/* Threshold lines for first selected sensor */}
-              {selectedSensors.length > 0 && (() => {
-                const firstSensor = selectedSensors[0];
-                const baseKey = stripMachinePrefix(machineId, firstSensor);
-                const threshold = getBaselineThreshold(baseKey, baselineRanges) || getDefaultThreshold(baseKey) || getDefaultThreshold(firstSensor);
-                return threshold ? (
-                  <>
-                    <ReferenceLine
-                      y={threshold.warning}
-                      stroke="#fbbf24"
-                      strokeDasharray="5 5"
-                      label={{
-                        value: 'Warning',
-                        fill: '#fbbf24',
-                        fontSize: 11,
-                      }}
-                    />
-                    <ReferenceLine
-                      y={threshold.critical}
-                      stroke="#ef4444"
-                      strokeDasharray="5 5"
-                      label={{
-                        value: 'Critical',
-                        fill: '#ef4444',
-                        fontSize: 11,
-                      }}
-                    />
-                  </>
-                ) : null;
-              })()}
-
               {/* Lines for each selected sensor */}
-              {selectedSensors.map((sensor) => (
+              {selectedSensors.map((sensor, idx) => (
                 <Line
                   key={sensor}
                   type="monotone"
                   dataKey={sensor}
                   name={formatSensorName(sensor)}
-                  stroke={getSensorColor(sensor)}
+                  stroke={getSensorColorByIndex(idx)}
                   strokeWidth={2}
                   dot={false}
                   activeDot={{ r: 6 }}

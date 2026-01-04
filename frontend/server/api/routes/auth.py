@@ -22,6 +22,10 @@ from api.schemas.auth import (
     Token,
     UserCreate,
     UserResponse,
+    SecureDeleteRequest,
+    PasswordVerifyRequest,
+    UserApprovalRequest,
+    PendingUsersResponse,
 )
 from config import settings
 from database import get_db
@@ -31,6 +35,7 @@ from utils.security import (
     create_refresh_token,
     decode_token,
     hash_password,
+    verify_password,
 )
 
 logger = logging.getLogger(__name__)
@@ -104,6 +109,67 @@ def register(
             detail=f"Invalid role. Must be one of: {', '.join(valid_roles)}",
         )
     
+    # Admin registration requires approval from an existing admin
+    # Exception: the very first user can be admin without approval
+    if user_data.role == "admin":
+        # Check if any users exist (first user exception)
+        existing_users = crud.get_users(db, skip=0, limit=1)
+        if existing_users:
+            # Not the first user - require admin approval password
+            if not user_data.admin_approval_password:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Admin registration requires approval: provide an existing admin's password",
+                )
+            
+            # Find any admin user and verify the approval password
+            admins = [u for u in crud.get_users(db, skip=0, limit=100) if u.role == "admin"]
+            if not admins:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No existing admin found. Contact system administrator.",
+                )
+            
+            # Try to verify against any admin's password
+            admin_approved = False
+            for admin in admins:
+                if verify_password(user_data.admin_approval_password, admin.hashed_password):
+                    admin_approved = True
+                    logger.info(f"Admin registration approved by admin user: {admin.username}")
+                    break
+            
+            if not admin_approved:
+                logger.warning(f"Admin registration failed: invalid admin approval password for '{user_data.username}'")
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Invalid admin approval password. Must match an existing admin's password.",
+                )
+        else:
+            # First user - allow admin without approval (becomes super admin)
+            logger.info(f"First user registration as admin (super admin): {user_data.username}")
+    
+    # Determine approval status based on role:
+    # - Viewers: auto-approved
+    # - Admins: auto-approved (they already passed admin password check)
+    # - Operators: require admin approval (is_approved=False)
+    is_approved = True  # Default for viewers and admins
+    if user_data.role == "operator":
+        # Check if any admins exist - if not, first operator is auto-approved
+        existing_users = crud.get_users(db, skip=0, limit=1)
+        if existing_users:
+            admins = [u for u in crud.get_users(db, skip=0, limit=100) if u.role == "admin"]
+            if admins:
+                is_approved = False  # Needs admin approval
+                logger.info(f"Operator '{user_data.username}' registered, pending admin approval")
+            else:
+                # No admins exist, auto-approve first operator
+                is_approved = True
+                logger.info(f"First operator '{user_data.username}' auto-approved (no admins exist)")
+        else:
+            # First user ever as operator - auto-approve
+            is_approved = True
+            logger.info(f"First user registration as operator: {user_data.username}")
+    
     # Hash password and create user
     hashed_password = hash_password(user_data.password)
     user = crud.create_user(
@@ -112,9 +178,10 @@ def register(
         email=user_data.email,
         hashed_password=hashed_password,
         role=user_data.role,
+        is_approved=is_approved,
     )
     
-    logger.info(f"User registered successfully: {user.username} (ID: {user.id})")
+    logger.info(f"User registered successfully: {user.username} (ID: {user.id}, approved: {is_approved})")
     return user
 
 
@@ -369,3 +436,112 @@ def list_users(
     logger.info(f"Admin user list requested by: {current_user.username}")
     users = crud.get_users(db, skip=skip, limit=limit)
     return users
+
+
+@router.post("/verify-password")
+def verify_user_password(
+    verify_data: PasswordVerifyRequest,
+    current_user: models.User = Depends(get_current_active_user),
+) -> Any:
+    """
+    Verify the current user's password.
+    
+    Used for secure operations that require password re-entry (e.g., delete operations).
+    
+    **Request Body:**
+    ```json
+    {
+        "password": "UserPassword123"
+    }
+    ```
+    
+    **Response:**
+    ```json
+    {
+        "verified": true
+    }
+    ```
+    
+    **Errors:**
+    - 401: Invalid password
+    """
+    if not verify_password(verify_data.password, current_user.hashed_password):
+        logger.warning(f"Password verification failed for user: {current_user.username}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid password",
+        )
+    
+    logger.info(f"Password verified for user: {current_user.username}")
+    return {"verified": True}
+
+
+# ==================== Operator Approval Endpoints (Admin Only) ====================
+
+@router.get("/pending-users", response_model=PendingUsersResponse)
+def get_pending_users(
+    skip: int = 0,
+    limit: int = 100,
+    current_user: models.User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> Any:
+    """
+    Get list of users pending approval (Admin only).
+    
+    Returns operators who have registered but not yet been approved.
+    
+    **Response:**
+    ```json
+    {
+        "pending_users": [...],
+        "total": 5
+    }
+    ```
+    """
+    logger.info(f"Pending users list requested by admin: {current_user.username}")
+    pending = crud.get_pending_users(db, skip=skip, limit=limit)
+    return PendingUsersResponse(pending_users=pending, total=len(pending))
+
+
+@router.post("/approve-user", response_model=UserResponse)
+def approve_user(
+    approval: UserApprovalRequest,
+    current_user: models.User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> Any:
+    """
+    Approve or reject a pending user (Admin only).
+    
+    **Request Body:**
+    ```json
+    {
+        "user_id": "uuid",
+        "approve": true
+    }
+    ```
+    
+    If approve=true, the user's is_approved is set to True.
+    If approve=false, the user is deleted from the system.
+    
+    **Errors:**
+    - 404: User not found
+    """
+    user = crud.get_user_by_id(db, approval.user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+    
+    if approval.approve:
+        updated_user = crud.approve_user(db, approval.user_id)
+        logger.info(f"User '{user.username}' approved by admin '{current_user.username}'")
+        return updated_user
+    else:
+        crud.reject_user(db, approval.user_id)
+        logger.info(f"User '{user.username}' rejected and deleted by admin '{current_user.username}'")
+        # Return a representation of the deleted user
+        raise HTTPException(
+            status_code=status.HTTP_200_OK,
+            detail=f"User '{user.username}' has been rejected and removed",
+        )

@@ -7,6 +7,7 @@ export type DashboardView =
   | 'models'
   | 'history'
   | 'reports'
+  | 'vlm'
   | 'tasks'
   | 'datasets'
   | 'settings';

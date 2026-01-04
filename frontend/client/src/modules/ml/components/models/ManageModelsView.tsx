@@ -20,6 +20,11 @@ import type { ModelType as TrainingModelType } from '../../api/mlTrainingApi';
 
 import { mlModelsApi } from '../../api/mlModelsApi';
 import type { MachineModelInventory, ModelType, InventoryStatus } from '../../api/mlModelsApi';
+import SecureDeleteDialog from '../../../../components/SecureDeleteDialog';
+
+interface ManageModelsViewProps {
+  userRole?: 'admin' | 'operator' | 'viewer';
+}
 
 const MODEL_TYPES: ModelType[] = ['classification', 'regression', 'anomaly', 'timeseries'];
 
@@ -50,7 +55,7 @@ function isFullyTrained(models: MachineModelInventory['models'] | undefined | nu
   return MODEL_TYPES.every((t) => (m?.[t]?.status || 'missing') === 'available');
 }
 
-export default function ManageModelsView() {
+export default function ManageModelsView({ userRole }: ManageModelsViewProps) {
   const { registerRunningTask } = useTaskSession();
 
   const [loading, setLoading] = useState(false);
@@ -58,6 +63,10 @@ export default function ManageModelsView() {
   const [inventory, setInventory] = useState<MachineModelInventory[]>([]);
 
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+
+  // Secure delete dialog state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [machineToDelete, setMachineToDelete] = useState<string | null>(null);
 
   const [search, setSearch] = useState('');
   const [trainedFilter, setTrainedFilter] = useState<'all' | 'trained' | 'untrained'>('all');
@@ -127,20 +136,28 @@ export default function ManageModelsView() {
     }
   };
 
-  const handleDeleteAll = async (machineId: string) => {
+  const handleDeleteAll = (machineId: string) => {
+    setMachineToDelete(machineId);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!machineToDelete) return;
     setActionMessage(null);
     setError(null);
     try {
-      const resp = await mlModelsApi.deleteAllModels(machineId);
+      const resp = await mlModelsApi.deleteAllModels(machineToDelete);
       const errorCount = Object.keys(resp.errors || {}).length;
       setActionMessage(
         errorCount > 0
-          ? `Deleted all models for ${machineId} (with ${errorCount} errors)`
-          : `Deleted all models for ${machineId}`
+          ? `Deleted all models for ${machineToDelete} (with ${errorCount} errors)`
+          : `Deleted all models for ${machineToDelete}`
       );
+      setMachineToDelete(null);
       await load();
     } catch (e: any) {
       setError(e?.message || 'Delete all failed');
+      throw e; // Re-throw so SecureDeleteDialog knows it failed
     }
   };
 
@@ -250,14 +267,16 @@ export default function ManageModelsView() {
                   <Button size="small" variant="contained" onClick={() => handleRetrainAll(m.machine_id)}>
                     {trainAllLabel(m)}
                   </Button>
-                  <Button
-                    size="small"
-                    color="error"
-                    variant="outlined"
-                    onClick={() => handleDeleteAll(m.machine_id)}
-                  >
-                    Delete All Models
-                  </Button>
+                  {userRole === 'admin' && (
+                    <Button
+                      size="small"
+                      color="error"
+                      variant="outlined"
+                      onClick={() => handleDeleteAll(m.machine_id)}
+                    >
+                      Delete All Models
+                    </Button>
+                  )}
                 </Stack>
               </Stack>
 
@@ -300,6 +319,16 @@ export default function ManageModelsView() {
           ))}
         </Stack>
       </Paper>
+
+      <SecureDeleteDialog
+        open={deleteDialogOpen}
+        onClose={() => setDeleteDialogOpen(false)}
+        onConfirm={handleDeleteConfirm}
+        title="Delete All Models"
+        description="This will permanently delete all trained model artifacts for this machine."
+        itemName={machineToDelete || undefined}
+        confirmButtonText="Delete All Models"
+      />
     </Container>
   );
 }

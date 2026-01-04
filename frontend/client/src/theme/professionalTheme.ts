@@ -94,7 +94,7 @@ const colors = {
 // ============================================================
 
 const typography = {
-  fontFamily: '"Inter", "Roboto", "Helvetica", "Arial", sans-serif',
+  fontFamily: '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif',
   
   // Headings
   h1: {

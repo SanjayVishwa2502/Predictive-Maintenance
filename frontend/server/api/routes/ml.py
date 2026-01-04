@@ -5,11 +5,14 @@ Phase 3.7.3 Day 15.2: ML Dashboard Backend
 REST API endpoints for ML predictions and machine monitoring
 Integrates with MLManager service for model inference
 """
-from fastapi import APIRouter, HTTPException, Query, Path, Depends
+from fastapi import APIRouter, HTTPException, Query, Path, Depends, Header
 from fastapi.responses import FileResponse
 from typing import Optional
 from datetime import datetime, timedelta, timezone
 import logging
+
+from api.dependencies import require_admin, require_operator, get_current_active_user
+from db import models
 
 from ..models.ml import (
     PredictionRequest,
@@ -50,7 +53,7 @@ sys.path.append(str(PathLib(__file__).resolve().parents[2]))
 from services.ml_manager import ml_manager
 from services.sensor_simulator import get_simulator
 from services.printer_log_reader import read_latest_printer_reading, reading_to_status_fields
-from services.history_store import add_snapshot, list_snapshots, list_runs, get_run
+from services.history_store import add_snapshot, list_snapshots, list_runs, get_run, clear_machine_history
 from services.auto_prediction_runner import auto_prediction_runner
 from services.audit_csv import list_datasets, latest_dataset_path
 from services.wide_dataset_csv import append_snapshot_row, latest_wide_dataset_path
@@ -229,12 +232,13 @@ async def model_inventory():
 @router.delete(
     "/models/{machine_id}/{model_type}",
     response_model=DeleteModelResponse,
-    summary="Delete Model Artifacts",
-    description="Delete a machine's model directory and its performance report file.",
+    summary="Delete Model Artifacts (Admin Only)",
+    description="Delete a machine's model directory and its performance report file. Requires admin role.",
 )
 async def delete_model(
     machine_id: str = Path(..., description="Machine identifier"),
     model_type: ModelType = Path(..., description="Model type"),
+    current_user: models.User = Depends(require_admin),
 ):
     try:
         model_type_str = model_type.value
@@ -266,11 +270,12 @@ async def delete_model(
 @router.delete(
     "/models/{machine_id}",
     response_model=DeleteAllModelsResponse,
-    summary="Delete All Model Artifacts",
-    description="Delete all model directories and performance report files for a machine.",
+    summary="Delete All Model Artifacts (Admin Only)",
+    description="Delete all model directories and performance report files for a machine. Requires admin role.",
 )
 async def delete_all_models(
     machine_id: str = Path(..., description="Machine identifier"),
+    current_user: models.User = Depends(require_admin),
 ):
     results: dict[str, DeleteModelResponse] = {}
     errors: dict[str, str] = {}
@@ -422,6 +427,7 @@ async def get_machine_status(
                 run_prediction_only,
                 preload_models_for_machine,
             )
+            from services.history_store import get_run_id_for_stamp, get_run
             
             # Preload models on first status call for this machine
             preload_models_for_machine(machine_id)
@@ -433,8 +439,11 @@ async def get_machine_status(
             
             # Store snapshot and check for auto-prediction
             sensor_data = status.get("latest_sensors", {})
+            pred_result = None
             if sensor_data:
                 try:
+                    from services.llm_busy import is_llm_busy
+
                     stamp = status["last_update"].astimezone(timezone.utc).isoformat().replace("+00:00", "Z") if status.get("last_update") else datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                     await add_snapshot(
                         machine_id=machine_id,
@@ -442,9 +451,24 @@ async def get_machine_status(
                         data_stamp=stamp,
                     )
                     status["data_stamp"] = stamp
+
+                    # If a run already exists for this stamp (e.g., a prior slow run finished), surface it.
+                    existing_run_id = await get_run_id_for_stamp(machine_id, stamp)
+                    if existing_run_id:
+                        status["run_id"] = str(existing_run_id)
+                        try:
+                            existing_run = await get_run(str(existing_run_id))
+                            if isinstance(existing_run, dict):
+                                status["run_type"] = str(existing_run.get("run_type") or "explanation")
+                        except Exception:
+                            # Best-effort only
+                            pass
                     
                     # Auto-prediction every 5th data point (ML only, no LLM)
-                    if should_run_prediction(machine_id):
+                    # If an LLM explanation is running, pause auto predictions to reduce resource contention.
+                    llm_busy = await is_llm_busy(machine_id)
+                    status["llm_busy"] = llm_busy  # Expose to frontend for UI feedback
+                    if (not llm_busy) and should_run_prediction(machine_id):
                         logger.info(f"[AUTO] Triggering prediction-only run for {machine_id}")
                         pred_result = await run_prediction_only(
                             machine_id=machine_id,
@@ -452,10 +476,8 @@ async def get_machine_status(
                             data_stamp=stamp,
                         )
                         if pred_result:
-                            status["auto_prediction"] = {
-                                "run_id": pred_result.get("run_id"),
-                                "run_type": "prediction",
-                            }
+                            status["run_id"] = str(pred_result.get("run_id") or "") or None
+                            status["run_type"] = "prediction"
                             logger.info(f"[OK] Auto prediction completed for {machine_id}: {pred_result.get('run_id')}")
                     
                     # Wide CSV dataset capture
@@ -466,7 +488,8 @@ async def get_machine_status(
                             data_stamp=stamp,
                             sensor_data=sensor_data,
                             client_id=client_id,
-                            run_id=str(status.get("auto_prediction", {}).get("run_id") or ""),
+                            run_id=str(status.get("run_id") or ""),
+                            predictions=(pred_result or {}).get("predictions") if pred_result else None,
                         )
                 except Exception as e:
                     logger.debug(f"Snapshot persistence skipped for {machine_id}: {e}")
@@ -663,6 +686,38 @@ async def get_machine_runs(
         raise HTTPException(status_code=500, detail=f"Failed to list runs: {str(e)}")
 
 
+@router.delete(
+    "/machines/{machine_id}/history",
+    summary="Delete all prediction history (Admin Only)",
+    description="Delete all stored snapshots and runs for a machine (clears Prediction History table). Requires admin role.",
+)
+async def delete_machine_history(
+    machine_id: str = Path(..., description="Machine identifier"),
+    current_user: models.User = Depends(require_admin),
+):
+    try:
+        from services.auto_prediction_service import reset_counter
+        from services.llm_busy import clear_llm_busy
+
+        result = await clear_machine_history(machine_id)
+
+        # Reset the auto-prediction cadence for a clean restart.
+        try:
+            reset_counter(machine_id)
+        except Exception:
+            pass
+
+        try:
+            await clear_llm_busy(machine_id)
+        except Exception:
+            pass
+
+        return {"machine_id": machine_id, **(result or {})}
+    except Exception as e:
+        logger.error(f"Failed to clear history for {machine_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to clear history: {str(e)}")
+
+
 @router.get(
     "/runs/{run_id}",
     summary="Get prediction run details",
@@ -690,13 +745,14 @@ async def get_run_details(
 
 @router.post(
     "/machines/{machine_id}/auto/start",
-    summary="Start backend auto prediction+LLM",
-    description="Register a machine for backend-side auto runs (default 150 seconds).",
+    summary="Start backend auto prediction+LLM (Operator/Admin only)",
+    description="Register a machine for backend-side auto runs (default 150 seconds). Requires operator or admin role.",
 )
 async def start_auto_runs(
     machine_id: str = Path(..., description="Machine identifier"),
     interval_seconds: int = Query(150, ge=30, le=3600, description="Interval in seconds"),
     client_id: str = Query("", description="Dashboard client id for WS push updates"),
+    current_user: models.User = Depends(require_operator),
 ):
     try:
         return await auto_prediction_runner.start(machine_id, interval_seconds=interval_seconds, client_id=client_id)
@@ -707,10 +763,11 @@ async def start_auto_runs(
 
 @router.post(
     "/machines/{machine_id}/auto/stop",
-    summary="Stop backend auto prediction+LLM",
+    summary="Stop backend auto prediction+LLM (Operator/Admin only)",
 )
 async def stop_auto_runs(
     machine_id: str = Path(..., description="Machine identifier"),
+    current_user: models.User = Depends(require_operator),
 ):
     try:
         return await auto_prediction_runner.stop(machine_id)
@@ -735,13 +792,14 @@ async def auto_runs_status(
 
 @router.post(
     "/machines/{machine_id}/auto/run_once",
-    summary="Run one prediction+LLM cycle now",
-    description="Immediately create a run (uses latest snapshot) and enqueue LLM tasks.",
+    summary="Run one prediction+LLM cycle now (Operator/Admin only)",
+    description="Immediately create a run (uses latest snapshot) and enqueue LLM tasks. Requires operator or admin role.",
 )
 async def auto_run_once(
     machine_id: str = Path(..., description="Machine identifier"),
     client_id: str = Query("", description="Dashboard client id for WS push updates"),
     session_id: str = Query("", description="Per-browser-session id for dataset capture"),
+    current_user: models.User = Depends(require_operator),
 ):
     try:
         return await auto_prediction_runner.run_once(machine_id, client_id=client_id, session_id=session_id)
@@ -784,7 +842,10 @@ async def auto_run_once(
         500: {"model": ErrorResponse, "description": "Prediction failed"}
     }
 )
-async def predict_classification(request: PredictionRequest):
+async def predict_classification(
+    request: PredictionRequest,
+    current_user: models.User = Depends(require_operator),
+):
     """
     Run classification prediction with LLM explanation
     """
@@ -881,7 +942,10 @@ async def predict_classification(request: PredictionRequest):
         500: {"model": ErrorResponse, "description": "Prediction failed"}
     }
 )
-async def predict_rul(request: PredictionRequest):
+async def predict_rul(
+    request: PredictionRequest,
+    current_user: models.User = Depends(require_operator),
+):
     """
     Run RUL prediction with maintenance recommendations
     """
@@ -964,7 +1028,10 @@ async def predict_rul(request: PredictionRequest):
         500: {"model": ErrorResponse, "description": "Prediction failed"},
     },
 )
-async def predict_anomaly(request: PredictionRequest):
+async def predict_anomaly(
+    request: PredictionRequest,
+    current_user: models.User = Depends(require_operator),
+):
     try:
         logger.info(f"Running anomaly detection for {request.machine_id}")
 
@@ -1026,7 +1093,10 @@ async def predict_anomaly(request: PredictionRequest):
         500: {"model": ErrorResponse, "description": "Prediction failed"},
     },
 )
-async def predict_timeseries(request: PredictionRequest):
+async def predict_timeseries(
+    request: PredictionRequest,
+    current_user: models.User = Depends(require_operator),
+):
     try:
         logger.info(f"Running timeseries forecast for {request.machine_id}")
 
