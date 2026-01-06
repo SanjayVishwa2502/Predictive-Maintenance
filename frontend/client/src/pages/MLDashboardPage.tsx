@@ -68,6 +68,7 @@ import {
   ListItemIcon,
   ListItemText,
 } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import {
   Wifi as WifiIcon,
   WifiOff as WifiOffIcon,
@@ -1049,18 +1050,18 @@ function MLDashboardPageInner() {
         position="fixed" 
         sx={{ 
           zIndex: (theme) => theme.zIndex.drawer + 1,
-          background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.95) 0%, rgba(17, 24, 39, 0.95) 100%)',
-          backdropFilter: 'blur(10px)',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+          bgcolor: (theme) => alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.85 : 0.95),
+          backdropFilter: (theme) => (theme.palette.mode === 'dark' ? 'blur(10px)' : undefined),
+          borderBottom: 1,
+          borderColor: 'divider',
         }}
       >
         <Toolbar>
           <IconButton
-            color="inherit"
             aria-label="open drawer"
             edge="start"
             onClick={() => setDrawerOpen(!drawerOpen)}
-            sx={{ mr: 2 }}
+            sx={{ mr: 2, color: 'text.primary' }}
           >
             <MenuIcon />
           </IconButton>
@@ -1097,7 +1098,10 @@ function MLDashboardPageInner() {
                   icon={<SyncIcon sx={{ animation: 'spin 1s linear infinite', '@keyframes spin': { from: { transform: 'rotate(0deg)' }, to: { transform: 'rotate(360deg)' } } }} />}
                   label="Syncing"
                   size="small"
-                  sx={{ bgcolor: 'rgba(103, 126, 234, 0.2)', color: '#667eea' }}
+                  sx={(theme) => ({
+                    bgcolor: alpha(theme.palette.primary.main, theme.palette.mode === 'dark' ? 0.18 : 0.12),
+                    color: theme.palette.primary.main,
+                  })}
                 />
               )}
 
@@ -1118,7 +1122,7 @@ function MLDashboardPageInner() {
               />
 
               {lastSyncTime && isConnected && (
-                <Typography variant="caption" sx={{ color: '#e5e7eb', ml: 1 }}>
+                <Typography variant="caption" sx={{ color: 'text.secondary', ml: 1 }}>
                   Last sync: {lastSyncTime.toLocaleTimeString()}
                 </Typography>
               )}
@@ -1126,7 +1130,7 @@ function MLDashboardPageInner() {
               {/* User Profile Menu */}
               {currentUser && (
                 <>
-                  <Divider orientation="vertical" flexItem sx={{ mx: 1, borderColor: 'rgba(255,255,255,0.2)' }} />
+                  <Divider orientation="vertical" flexItem sx={{ mx: 1, borderColor: 'divider' }} />
                   <Tooltip title={`Signed in as ${currentUser.username}`}>
                     <IconButton
                       onClick={(e) => setUserMenuAnchor(e.currentTarget)}
@@ -1134,17 +1138,18 @@ function MLDashboardPageInner() {
                       sx={{ ml: 1 }}
                     >
                       <Avatar
-                        sx={{
+                        sx={(theme) => ({
                           width: 36,
                           height: 36,
-                          bgcolor: ROLE_CONFIG[currentUser.role as UserRole]?.color === 'error' 
-                            ? '#ef4444' 
-                            : ROLE_CONFIG[currentUser.role as UserRole]?.color === 'primary'
-                            ? '#3b82f6'
-                            : '#10b981',
+                          bgcolor:
+                            ROLE_CONFIG[currentUser.role as UserRole]?.color === 'error'
+                              ? theme.palette.error.main
+                              : ROLE_CONFIG[currentUser.role as UserRole]?.color === 'primary'
+                              ? theme.palette.info.main
+                              : theme.palette.success.main,
                           fontSize: '0.875rem',
                           fontWeight: 600,
-                        }}
+                        })}
                       >
                         {currentUser.username.slice(0, 2).toUpperCase()}
                       </Avatar>
@@ -1160,8 +1165,9 @@ function MLDashboardPageInner() {
                       sx: {
                         minWidth: 240,
                         mt: 1,
-                        background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.98) 0%, rgba(17, 24, 39, 0.98) 100%)',
-                        border: '1px solid rgba(255,255,255,0.1)',
+                        bgcolor: 'background.paper',
+                        border: 1,
+                        borderColor: 'divider',
                       },
                     }}
                   >
@@ -1176,10 +1182,10 @@ function MLDashboardPageInner() {
                         <RoleBadge role={currentUser.role as UserRole} />
                       </Box>
                     </Box>
-                    <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)' }} />
-                    <MenuItem onClick={handleLogout} sx={{ color: '#ef4444' }}>
+                    <Divider sx={{ borderColor: 'divider' }} />
+                    <MenuItem onClick={handleLogout} sx={{ color: 'error.main' }}>
                       <ListItemIcon>
-                        <LogoutIcon fontSize="small" sx={{ color: '#ef4444' }} />
+                        <LogoutIcon fontSize="small" sx={{ color: 'error.main' }} />
                       </ListItemIcon>
                       <ListItemText>Sign Out</ListItemText>
                     </MenuItem>
@@ -1204,9 +1210,10 @@ function MLDashboardPageInner() {
           '& .MuiDrawer-paper': {
             width: 280,
             boxSizing: 'border-box',
-            background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.98) 0%, rgba(17, 24, 39, 0.98) 100%)',
-            backdropFilter: 'blur(10px)',
-            borderRight: '1px solid rgba(255, 255, 255, 0.1)',
+            bgcolor: (theme) => alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.9 : 0.98),
+            backdropFilter: (theme) => (theme.palette.mode === 'dark' ? 'blur(10px)' : undefined),
+            borderRight: 1,
+            borderColor: 'divider',
           },
         }}
       >
@@ -1245,8 +1252,9 @@ function MLDashboardPageInner() {
             icon={<HourglassEmptyIcon />}
             sx={{
               mb: 2,
-              background: 'rgba(245, 158, 11, 0.15)',
-              border: '1px solid rgba(245, 158, 11, 0.4)',
+              background: (theme) => alpha(theme.palette.warning.main, theme.palette.mode === 'dark' ? 0.18 : 0.12),
+              border: 1,
+              borderColor: (theme) => alpha(theme.palette.warning.main, 0.45),
               '& .MuiAlert-message': { width: '100%' },
             }}
           >
@@ -1266,17 +1274,17 @@ function MLDashboardPageInner() {
             <Box sx={{ mb: 4 }}>
               <Typography
                 variant="h3"
-                sx={{
+                sx={(theme) => ({
                   fontWeight: 700,
-                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                  background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
                   WebkitBackgroundClip: 'text',
                   WebkitTextFillColor: 'transparent',
                   mb: 1,
-                }}
+                })}
               >
                 Machine Health Dashboard
               </Typography>
-              <Typography variant="body1" sx={{ color: '#d1d5db' }}>
+              <Typography variant="body1" sx={{ color: 'text.secondary' }}>
                 Real-time monitoring and predictive maintenance for industrial equipment
               </Typography>
 
@@ -1285,12 +1293,15 @@ function MLDashboardPageInner() {
                 <Chip
                   label="Need Training Data?"
                   onClick={() => setSelectedView('gan')}
-                  sx={{ bgcolor: 'rgba(103, 126, 234, 0.18)', color: '#e5e7eb' }}
+                  sx={(theme) => ({
+                    bgcolor: alpha(theme.palette.primary.main, theme.palette.mode === 'dark' ? 0.18 : 0.12),
+                    color: theme.palette.text.primary,
+                  })}
                 />
                 <Chip
                   label="View History"
                   onClick={() => setSelectedView('history')}
-                  sx={{ bgcolor: 'rgba(255, 255, 255, 0.06)', color: '#e5e7eb' }}
+                  sx={{ bgcolor: 'action.hover', color: 'text.primary' }}
                 />
               </Box>
             </Box>
@@ -1301,9 +1312,10 @@ function MLDashboardPageInner() {
               sx={{
                 p: 3,
                 mb: 3,
-                background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.8) 0%, rgba(17, 24, 39, 0.8) 100%)',
-                backdropFilter: 'blur(10px)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
+                bgcolor: (theme) => alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.75 : 0.95),
+                backdropFilter: (theme) => (theme.palette.mode === 'dark' ? 'blur(10px)' : undefined),
+                border: 1,
+                borderColor: 'divider',
               }}
             >
               <MachineSelector
@@ -1379,21 +1391,22 @@ function MLDashboardPageInner() {
               /* Empty State */
               <Paper
                 elevation={3}
-                sx={{
+                sx={(theme) => ({
                   p: 8,
                   textAlign: 'center',
-                  background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.8) 0%, rgba(17, 24, 39, 0.8) 100%)',
-                  backdropFilter: 'blur(10px)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                }}
+                  bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.75 : 0.95),
+                  backdropFilter: theme.palette.mode === 'dark' ? 'blur(10px)' : undefined,
+                  border: 1,
+                  borderColor: 'divider',
+                })}
               >
                 <Typography
                   variant="h5"
-                  sx={{ color: '#9ca3af', mb: 2, fontWeight: 600 }}
+                  sx={{ color: 'text.secondary', mb: 2, fontWeight: 600 }}
                 >
                   Select a Machine to Begin Monitoring
                 </Typography>
-                <Typography variant="body1" sx={{ color: '#6b7280' }}>
+                <Typography variant="body1" sx={{ color: 'text.secondary' }}>
                   Choose a machine from the dropdown above to view real-time sensor data,
                   run predictions, and monitor health status
                 </Typography>
@@ -1450,18 +1463,19 @@ function MLDashboardPageInner() {
           <Container maxWidth="xl">
             <Paper
               elevation={3}
-              sx={{
+              sx={(theme) => ({
                 p: 8,
                 textAlign: 'center',
-                background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.8) 0%, rgba(17, 24, 39, 0.8) 100%)',
-                backdropFilter: 'blur(10px)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-              }}
+                bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.75 : 0.95),
+                backdropFilter: theme.palette.mode === 'dark' ? 'blur(10px)' : undefined,
+                border: 1,
+                borderColor: 'divider',
+              })}
             >
-              <Typography variant="h4" sx={{ color: '#9ca3af', mb: 2, fontWeight: 600 }}>
+              <Typography variant="h4" sx={{ color: 'text.secondary', mb: 2, fontWeight: 600 }}>
                 Prediction History
               </Typography>
-              <Typography variant="body1" sx={{ color: '#6b7280' }}>
+              <Typography variant="body1" sx={{ color: 'text.secondary' }}>
                 Historical prediction analytics coming soon
               </Typography>
             </Paper>
@@ -1473,18 +1487,19 @@ function MLDashboardPageInner() {
           <Container maxWidth="xl">
             <Paper
               elevation={3}
-              sx={{
+              sx={(theme) => ({
                 p: 8,
                 textAlign: 'center',
-                background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.8) 0%, rgba(17, 24, 39, 0.8) 100%)',
-                backdropFilter: 'blur(10px)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-              }}
+                bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.75 : 0.95),
+                backdropFilter: theme.palette.mode === 'dark' ? 'blur(10px)' : undefined,
+                border: 1,
+                borderColor: 'divider',
+              })}
             >
-              <Typography variant="h4" sx={{ color: '#9ca3af', mb: 2, fontWeight: 600 }}>
+              <Typography variant="h4" sx={{ color: 'text.secondary', mb: 2, fontWeight: 600 }}>
                 Reports
               </Typography>
-              <Typography variant="body1" sx={{ color: '#6b7280' }}>
+              <Typography variant="body1" sx={{ color: 'text.secondary' }}>
                 Report generation and analytics coming soon
               </Typography>
             </Paper>

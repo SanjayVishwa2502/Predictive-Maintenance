@@ -23,6 +23,7 @@ import {
   Stack,
   Badge,
 } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import {
   Timeline as TimelineIcon,
   AutoFixHigh as AutoFixHighIcon,
@@ -130,21 +131,21 @@ export default function NavigationPanel({ selectedView, onSelectView, onContinue
       <Box sx={{ p: 2, textAlign: 'center' }}>
         <Typography
           variant="h6"
-          sx={{
+          sx={(theme) => ({
             fontWeight: 700,
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent',
-          }}
+          })}
         >
           Dashboard Menu
         </Typography>
-        <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
           Navigate between features
         </Typography>
       </Box>
 
-      <Divider sx={{ bgcolor: 'rgba(255, 255, 255, 0.1)' }} />
+      <Divider sx={{ borderColor: 'divider' }} />
 
       {/* Navigation List */}
       <Box sx={{ flex: 1, overflow: 'auto' }}>
@@ -161,26 +162,29 @@ export default function NavigationPanel({ selectedView, onSelectView, onContinue
                     }
                     onSelectView(option.id);
                   }}
-                  sx={{
+                  sx={(theme) => ({
                     mx: 1,
                     borderRadius: 2,
                     '&.Mui-selected': {
-                      bgcolor: 'rgba(103, 126, 234, 0.15)',
-                      borderLeft: '3px solid #667eea',
+                      bgcolor: alpha(theme.palette.primary.main, theme.palette.mode === 'dark' ? 0.18 : 0.12),
+                      borderLeft: `3px solid ${theme.palette.primary.main}`,
                       '&:hover': {
-                        bgcolor: 'rgba(103, 126, 234, 0.2)',
+                        bgcolor: alpha(theme.palette.primary.main, theme.palette.mode === 'dark' ? 0.24 : 0.16),
                       },
                     },
                     '&:hover': {
-                      bgcolor: 'rgba(255, 255, 255, 0.05)',
+                      bgcolor: theme.palette.action.hover,
                     },
-                  }}
+                  })}
                 >
                   <ListItemIcon
-                    sx={{
-                      color: option.id !== 'continue_workflow' && selectedView === option.id ? '#667eea' : '#9ca3af',
+                    sx={(theme) => ({
+                      color:
+                        option.id !== 'continue_workflow' && selectedView === option.id
+                          ? theme.palette.primary.main
+                          : theme.palette.text.secondary,
                       minWidth: 40,
-                    }}
+                    })}
                   >
                     {option.id === 'tasks' && runningCount > 0 ? (
                       <Badge color="primary" badgeContent={runningCount} max={99}>
@@ -196,17 +200,17 @@ export default function NavigationPanel({ selectedView, onSelectView, onContinue
                     primaryTypographyProps={{
                       fontSize: '0.95rem',
                       fontWeight: selectedView === option.id ? 600 : 400,
-                      color: selectedView === option.id ? '#e5e7eb' : '#d1d5db',
+                      color: selectedView === option.id ? 'text.primary' : 'text.secondary',
                     }}
                     secondaryTypographyProps={{
                       fontSize: '0.75rem',
-                      color: '#9ca3af',
+                      color: 'text.secondary',
                     }}
                   />
                 </ListItemButton>
               </ListItem>
               {option.dividerAfter && (
-                <Divider sx={{ my: 1, mx: 2, bgcolor: 'rgba(255, 255, 255, 0.05)' }} />
+                <Divider sx={{ my: 1, mx: 2, borderColor: 'divider' }} />
               )}
             </Box>
           ))}
@@ -214,9 +218,9 @@ export default function NavigationPanel({ selectedView, onSelectView, onContinue
 
         {(runningTasks.length > 0 || completedTasks.length > 0) && (
           <Box sx={{ px: 2, pb: 2 }}>
-            <Divider sx={{ my: 1, bgcolor: 'rgba(255, 255, 255, 0.08)' }} />
+            <Divider sx={{ my: 1, borderColor: 'divider' }} />
             <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-              <Typography variant="subtitle2" sx={{ color: '#d1d5db' }}>
+              <Typography variant="subtitle2" sx={{ color: 'text.primary' }}>
                 Tasks (session)
               </Typography>
               <Stack direction="row" spacing={1}>
@@ -227,10 +231,10 @@ export default function NavigationPanel({ selectedView, onSelectView, onContinue
 
             {runningTasks.slice(0, 4).map((t) => (
               <Box key={t.task_id} sx={{ mb: 1 }}>
-                <Typography variant="caption" sx={{ color: '#9ca3af', display: 'block' }}>
+                <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
                   {t.kind.toUpperCase()} • {t.machine_id}
                 </Typography>
-                <Typography variant="caption" sx={{ color: '#6b7280' }}>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                   {typeof t.progress_percent === 'number' ? `${Math.round(t.progress_percent)}%` : '…'}
                   {t.message ? ` • ${t.message}` : ''}
                 </Typography>
@@ -238,17 +242,22 @@ export default function NavigationPanel({ selectedView, onSelectView, onContinue
             ))}
 
             {runningTasks.length === 0 && completedTasks.length > 0 && (
-              <Typography variant="caption" sx={{ color: '#6b7280' }}>
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                 No running tasks.
               </Typography>
             )}
 
             {completedTasks.slice(0, 4).map((t) => (
               <Box key={t.task_id} sx={{ mt: 1 }}>
-                <Typography variant="caption" sx={{ color: '#9ca3af', display: 'block' }}>
+                <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
                   {t.kind.toUpperCase()} • {t.machine_id}
                 </Typography>
-                <Typography variant="caption" sx={{ color: t.status === 'SUCCESS' ? '#86efac' : '#fca5a5' }}>
+                <Typography
+                  variant="caption"
+                  sx={(theme) => ({
+                    color: t.status === 'SUCCESS' ? theme.palette.success.main : theme.palette.error.main,
+                  })}
+                >
                   {t.status}
                 </Typography>
               </Box>
@@ -259,7 +268,7 @@ export default function NavigationPanel({ selectedView, onSelectView, onContinue
 
       {/* Footer */}
       <Box sx={{ p: 2, textAlign: 'center' }}>
-        <Typography variant="caption" sx={{ color: '#6b7280' }}>
+        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
           Phase 3.7.6.1 - Navigation Panel
         </Typography>
       </Box>

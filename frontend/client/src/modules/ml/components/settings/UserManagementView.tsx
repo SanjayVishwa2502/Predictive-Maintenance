@@ -32,6 +32,7 @@ import {
   DialogActions,
   Avatar,
 } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import {
   CheckCircle as ApproveIcon,
   Cancel as RejectIcon,
@@ -175,18 +176,19 @@ export default function UserManagementView({ userRole }: UserManagementViewProps
     return (
       <Paper
         elevation={3}
-        sx={{
+        sx={(theme) => ({
           p: 4,
           textAlign: 'center',
-          background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.8) 0%, rgba(17, 24, 39, 0.8) 100%)',
-          backdropFilter: 'blur(10px)',
-          border: '1px solid rgba(255, 255, 255, 0.1)',
-        }}
+          bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.75 : 0.95),
+          backdropFilter: theme.palette.mode === 'dark' ? 'blur(10px)' : undefined,
+          border: 1,
+          borderColor: 'divider',
+        })}
       >
-        <Typography variant="h6" sx={{ color: '#9ca3af' }}>
+        <Typography variant="h6" sx={{ color: 'text.primary' }}>
           User Management
         </Typography>
-        <Typography variant="body2" sx={{ color: '#6b7280', mt: 1 }}>
+        <Typography variant="body2" sx={{ color: 'text.secondary', mt: 1 }}>
           Only administrators can manage user accounts.
         </Typography>
       </Paper>
@@ -196,26 +198,27 @@ export default function UserManagementView({ userRole }: UserManagementViewProps
   return (
     <Paper
       elevation={3}
-      sx={{
+      sx={(theme) => ({
         p: 3,
-        background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.8) 0%, rgba(17, 24, 39, 0.8) 100%)',
-        backdropFilter: 'blur(10px)',
-        border: '1px solid rgba(255, 255, 255, 0.1)',
-      }}
+        bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.75 : 0.95),
+        backdropFilter: theme.palette.mode === 'dark' ? 'blur(10px)' : undefined,
+        border: 1,
+        borderColor: 'divider',
+      })}
     >
       {/* Header */}
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
         <Box>
-          <Typography variant="h5" sx={{ fontWeight: 600, color: '#e5e7eb' }}>
+          <Typography variant="h5" sx={{ fontWeight: 600, color: 'text.primary' }}>
             Pending Operator Approvals
           </Typography>
-          <Typography variant="body2" sx={{ color: '#9ca3af', mt: 0.5 }}>
+          <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
             Review and approve operator registrations
           </Typography>
         </Box>
         <Tooltip title="Refresh pending users">
           <IconButton onClick={fetchPendingUsers} disabled={loading}>
-            <RefreshIcon sx={{ color: loading ? '#6b7280' : '#667eea' }} />
+            <RefreshIcon sx={{ color: loading ? 'text.disabled' : 'primary.main' }} />
           </IconButton>
         </Tooltip>
       </Stack>
@@ -235,7 +238,7 @@ export default function UserManagementView({ userRole }: UserManagementViewProps
       {/* Loading State */}
       {loading && (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-          <CircularProgress size={40} sx={{ color: '#667eea' }} />
+            <CircularProgress size={40} color="primary" />
         </Box>
       )}
 
@@ -360,17 +363,19 @@ export default function UserManagementView({ userRole }: UserManagementViewProps
         open={confirmDialog?.open || false}
         onClose={closeConfirmDialog}
         PaperProps={{
-          sx: {
-            background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.98) 0%, rgba(17, 24, 39, 0.98) 100%)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-          },
+          sx: (theme) => ({
+            bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.98 : 1),
+            border: 1,
+            borderColor: 'divider',
+            borderRadius: 2,
+          }),
         }}
       >
-        <DialogTitle sx={{ color: '#e5e7eb' }}>
+        <DialogTitle sx={{ color: 'text.primary' }}>
           {confirmDialog?.action === 'approve' ? 'Approve Operator' : 'Reject Registration'}
         </DialogTitle>
         <DialogContent>
-          <DialogContentText sx={{ color: '#9ca3af' }}>
+          <DialogContentText sx={{ color: 'text.secondary' }}>
             {confirmDialog?.action === 'approve' ? (
               <>
                 Are you sure you want to approve <strong>{confirmDialog?.username}</strong> as an operator?

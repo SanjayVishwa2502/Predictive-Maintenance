@@ -29,6 +29,7 @@ import {
   Alert,
   Tooltip,
 } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import ThermostatIcon from '@mui/icons-material/Thermostat';
 import VibrationIcon from '@mui/icons-material/Vibration';
 import BoltIcon from '@mui/icons-material/Bolt';
@@ -264,20 +265,21 @@ const SensorCard: React.FC<SensorCardProps> = ({
 
   return (
     <Card
-      sx={{
+      sx={(theme) => ({
         height: '100%',
         minHeight: 160,
-        background: 'rgba(31, 41, 55, 0.8)',
-        backdropFilter: 'blur(10px)',
-        border: `1px solid ${statusColor}40`,
+        bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.75 : 0.95),
+        backdropFilter: theme.palette.mode === 'dark' ? 'blur(10px)' : undefined,
+        border: 1,
+        borderColor: alpha(statusColor, 0.25),
         borderRadius: 2,
         transition: 'all 0.3s ease',
         '&:hover': {
           transform: 'translateY(-4px)',
-          boxShadow: `0 8px 16px ${statusColor}30`,
-          borderColor: `${statusColor}80`,
+          boxShadow: `0 8px 16px ${alpha(statusColor, 0.2)}`,
+          borderColor: alpha(statusColor, 0.5),
         },
-      }}
+      })}
     >
       <CardContent sx={{ height: '100%', display: 'flex', flexDirection: 'column', p: 2 }}>
         {/* Icon & Value */}
@@ -337,26 +339,26 @@ const SensorCard: React.FC<SensorCardProps> = ({
           <LinearProgress
             variant="determinate"
             value={progressPercentage}
-            sx={{
+            sx={(theme) => ({
               height: 6,
               borderRadius: 3,
-              backgroundColor: 'rgba(148, 163, 184, 0.2)',
+              backgroundColor: alpha(theme.palette.text.disabled, 0.2),
               '& .MuiLinearProgress-bar': {
                 backgroundColor: statusColor,
                 borderRadius: 3,
                 transition: 'transform 0.4s ease',
               },
-            }}
+            })}
           />
           {threshold && (
             <Stack direction="row" justifyContent="space-between" sx={{ mt: 0.5 }}>
               <Typography variant="caption" sx={{ fontSize: '0.65rem', color: 'text.disabled' }}>
                 {typeof threshold.min === 'number' && !isNaN(threshold.min) ? threshold.min : 0}
               </Typography>
-              <Typography variant="caption" sx={{ fontSize: '0.65rem', color: '#fbbf24' }}>
+              <Typography variant="caption" sx={{ fontSize: '0.65rem', color: 'warning.main' }}>
                 ⚠ {threshold.warning}
               </Typography>
-              <Typography variant="caption" sx={{ fontSize: '0.65rem', color: '#ef4444' }}>
+              <Typography variant="caption" sx={{ fontSize: '0.65rem', color: 'error.main' }}>
                 🔴 {threshold.critical}
               </Typography>
             </Stack>
@@ -513,26 +515,9 @@ const SensorDashboard: React.FC<SensorDashboardProps> = ({
               }
               label={!connected ? 'Offline' : isStale ? 'Stale' : 'Live'}
               size="small"
-              sx={{
-                backgroundColor: !connected 
-                  ? 'rgba(100, 116, 139, 0.15)' 
-                  : isStale 
-                    ? 'rgba(251, 191, 36, 0.15)' 
-                    : 'rgba(16, 185, 129, 0.15)',
-                color: !connected 
-                  ? '#64748b' 
-                  : isStale 
-                    ? '#fbbf24' 
-                    : '#10b981',
-                borderColor: !connected 
-                  ? 'rgba(100, 116, 139, 0.3)' 
-                  : isStale 
-                    ? 'rgba(251, 191, 36, 0.3)' 
-                    : 'rgba(16, 185, 129, 0.3)',
-                border: '1px solid',
-                fontWeight: 600,
-                fontSize: '0.75rem',
-              }}
+              color={!connected ? 'default' : isStale ? 'warning' : 'success'}
+              variant="outlined"
+              sx={{ fontWeight: 600, fontSize: '0.75rem' }}
             />
           </Tooltip>
 
@@ -540,7 +525,7 @@ const SensorDashboard: React.FC<SensorDashboardProps> = ({
           <Typography 
             variant="caption" 
             sx={{ 
-              color: isStale ? '#fbbf24' : 'text.disabled', 
+              color: isStale ? 'warning.main' : 'text.disabled', 
               fontSize: '0.75rem',
               fontWeight: isStale ? 600 : 400,
             }}
@@ -559,11 +544,11 @@ const SensorDashboard: React.FC<SensorDashboardProps> = ({
           {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
             <Grid item xs={12} sm={6} md={4} lg={3} key={i}>
               <Card
-                sx={{
+                sx={(theme) => ({
                   height: 160,
-                  background: 'rgba(31, 41, 55, 0.8)',
+                  bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.75 : 0.95),
                   borderRadius: 2,
-                }}
+                })}
               >
                 <CardContent>
                   <Stack spacing={1}>

@@ -506,18 +506,19 @@ export default function PredictionCard({
 
     return (
       <Card
-        sx={{
-          background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.8) 0%, rgba(17, 24, 39, 0.8) 100%)',
-          backdropFilter: 'blur(10px)',
-          border: '1px solid rgba(255, 255, 255, 0.1)',
+        sx={(theme) => ({
+          bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.75 : 0.95),
+          backdropFilter: theme.palette.mode === 'dark' ? 'blur(10px)' : undefined,
+          border: 1,
+          borderColor: 'divider',
           borderRadius: 2,
           mb: 3,
-        }}
+        })}
       >
         <CardHeader
           title={
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
-              <Typography variant="h6" sx={{ color: '#e5e7eb', fontWeight: 600 }}>
+              <Typography variant="h6" sx={{ color: 'text.primary', fontWeight: 600 }}>
                 Run Details
               </Typography>
               <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
@@ -535,22 +536,16 @@ export default function PredictionCard({
                   <Button
                     size="small"
                     variant="contained"
+                    color="primary"
                     disabled
                     startIcon={
                       <CircularProgress
                         size={16}
                         thickness={4}
-                        sx={{ color: 'rgba(255, 255, 255, 0.6)' }}
+                        color="inherit"
                       />
                     }
-                    sx={{
-                      textTransform: 'none',
-                      bgcolor: 'rgba(102, 126, 234, 0.5)',
-                      '&.Mui-disabled': {
-                        bgcolor: 'rgba(102, 126, 234, 0.4)',
-                        color: 'rgba(255, 255, 255, 0.7)',
-                      },
-                    }}
+                    sx={{ textTransform: 'none' }}
                   >
                     Generating…
                   </Button>
@@ -560,18 +555,11 @@ export default function PredictionCard({
                       <Button
                         size="small"
                         variant="contained"
+                        color="primary"
                         startIcon={<PlayArrowIcon />}
                         onClick={onRunPrediction}
                         disabled={!canRunPrediction}
-                        sx={{
-                          textTransform: 'none',
-                          background: canRunPrediction
-                            ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-                            : 'rgba(107, 114, 128, 0.3)',
-                          '&.Mui-disabled': {
-                            color: 'rgba(255, 255, 255, 0.4)',
-                          },
-                        }}
+                        sx={{ textTransform: 'none' }}
                       >
                         Prediction
                       </Button>
@@ -586,7 +574,7 @@ export default function PredictionCard({
               <Chip
                 size="small"
                 label={`Machine: ${parsed?.meta?.machine || machineId}`}
-                sx={{ bgcolor: 'rgba(255, 255, 255, 0.06)', color: '#e5e7eb' }}
+                sx={(theme) => ({ bgcolor: alpha(theme.palette.action.selected, 0.1), color: 'text.secondary' })}
               />
               {isBusy ? (
                 <Chip
@@ -595,13 +583,12 @@ export default function PredictionCard({
                     <CircularProgress
                       size={12}
                       thickness={4}
-                      sx={{ color: '#a5b4fc', ml: 0.5 }}
+                      sx={{ color: 'primary.light', ml: 0.5 }}
                     />
                   }
                   label="AI Generating"
+                  color="primary"
                   sx={{
-                    bgcolor: 'rgba(102, 126, 234, 0.25)',
-                    color: '#a5b4fc',
                     fontWeight: 600,
                     animation: 'pulse 2s ease-in-out infinite',
                     '@keyframes pulse': {
@@ -615,14 +602,14 @@ export default function PredictionCard({
                 <Chip
                   size="small"
                   label={`Stamp: ${parsed.meta.dataStamp}`}
-                  sx={{ bgcolor: 'rgba(255, 255, 255, 0.06)', color: '#e5e7eb' }}
+                  sx={(theme) => ({ bgcolor: alpha(theme.palette.action.selected, 0.1), color: 'text.secondary' })}
                 />
               ) : null}
               {parsed?.meta?.compute ? (
                 <Chip
                   size="small"
                   label={`LLM: ${parsed.meta.compute}`}
-                  sx={{ bgcolor: 'rgba(255, 255, 255, 0.06)', color: '#e5e7eb' }}
+                  sx={(theme) => ({ bgcolor: alpha(theme.palette.action.selected, 0.1), color: 'text.secondary' })}
                 />
               ) : null}
               {riskChip ? (
@@ -663,10 +650,11 @@ export default function PredictionCard({
                 minHeight: 220,
                 p: 2,
                 borderRadius: 2,
-                bgcolor: 'rgba(0, 0, 0, 0.2)',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
+                bgcolor: 'action.hover',
+                border: 1,
+                borderColor: 'divider',
                 overflow: 'auto',
-                color: '#e5e7eb',
+                color: 'text.primary',
                 fontSize: 14,
                 lineHeight: 1.6,
               }}
@@ -693,8 +681,8 @@ export default function PredictionCard({
                     <CircularProgress
                       size={56}
                       thickness={3}
+                      color="primary"
                       sx={{
-                        color: '#667eea',
                         animation: 'pulse 2s ease-in-out infinite',
                         '@keyframes pulse': {
                           '0%, 100%': { opacity: 1 },
@@ -706,7 +694,7 @@ export default function PredictionCard({
                       sx={{
                         position: 'absolute',
                         fontSize: 24,
-                        color: '#a5b4fc',
+                        color: 'primary.light',
                         animation: 'sparkle 1.5s ease-in-out infinite',
                         '@keyframes sparkle': {
                           '0%, 100%': { transform: 'scale(1)', opacity: 1 },
@@ -719,7 +707,7 @@ export default function PredictionCard({
                     <Typography
                       variant="body1"
                       sx={{
-                        color: '#e5e7eb',
+                        color: 'text.primary',
                         fontWeight: 600,
                         mb: 0.5,
                       }}
@@ -729,7 +717,7 @@ export default function PredictionCard({
                     <Typography
                       variant="caption"
                       sx={{
-                        color: '#9ca3af',
+                        color: 'text.secondary',
                         display: 'block',
                       }}
                     >
@@ -755,7 +743,7 @@ export default function PredictionCard({
                     sx={{
                       '& h1, & h2, & h3': { margin: '0.25rem 0 0.25rem', fontWeight: 700 },
                       '& p': { margin: '0.35rem 0' },
-                      '& hr': { border: 0, borderTop: '1px solid rgba(255, 255, 255, 0.12)', margin: '0.75rem 0' },
+                      '& hr': { border: 0, borderTop: 1, borderColor: 'divider', margin: '0.75rem 0' },
                       '& ul': { margin: 0, paddingLeft: '1.25rem' },
                       '& li': { margin: '0.15rem 0' },
                       '& table': {
@@ -766,11 +754,12 @@ export default function PredictionCard({
                         fontSize: '0.875rem',
                       },
                       '& th, & td': {
-                        border: '1px solid rgba(255, 255, 255, 0.10)',
+                        border: 1,
+                        borderColor: 'divider',
                         padding: '6px 8px',
                         verticalAlign: 'top',
                       },
-                      '& th': { backgroundColor: 'rgba(255, 255, 255, 0.04)', color: '#e5e7eb', textAlign: 'left' },
+                      '& th': { backgroundColor: 'action.hover', color: 'text.primary', textAlign: 'left' },
                       '& code': { fontFamily: 'monospace', fontSize: '0.85em' },
                     }}
                   >
@@ -781,10 +770,10 @@ export default function PredictionCard({
                     {/* OVERALL */}
                     {parsed.llm.overall ? (
                       <Box>
-                        <Typography variant="overline" sx={{ color: '#9ca3af' }}>
+                        <Typography variant="overline" sx={{ color: 'text.secondary' }}>
                           Overall
                         </Typography>
-                        <Typography variant="body1" sx={{ color: '#e5e7eb', fontWeight: 600, mt: 0.5 }}>
+                        <Typography variant="body1" sx={{ color: 'text.primary', fontWeight: 600, mt: 0.5 }}>
                           {parsed.llm.overall}
                         </Typography>
                       </Box>
@@ -793,7 +782,7 @@ export default function PredictionCard({
                   {/* TOP CAUSES */}
                   {parsed.llm.topCauses.length > 0 ? (
                     <Box>
-                      <Typography variant="overline" sx={{ color: '#9ca3af' }}>
+                      <Typography variant="overline" sx={{ color: 'text.secondary' }}>
                         Top causes
                       </Typography>
                       <Box component="ul" sx={{ m: 0, mt: 0.75, pl: 2.5 }}>
@@ -802,7 +791,7 @@ export default function PredictionCard({
                             key={idx}
                             component="li"
                             variant="body2"
-                            sx={{ color: '#e5e7eb', mb: 0.5, '&::marker': { color: '#9ca3af' } }}
+                            sx={{ color: 'text.primary', mb: 0.5, '&::marker': { color: 'text.secondary' } }}
                           >
                             {c}
                           </Typography>
@@ -814,7 +803,7 @@ export default function PredictionCard({
                   {/* ACTIONS */}
                   {parsed.llm.immediateActions.length > 0 ? (
                     <Box>
-                      <Typography variant="overline" sx={{ color: '#9ca3af' }}>
+                      <Typography variant="overline" sx={{ color: 'text.secondary' }}>
                         {parsed.actionsLabel}
                       </Typography>
                       <Box component="ul" sx={{ m: 0, mt: 0.75, pl: 2.5 }}>
@@ -823,7 +812,7 @@ export default function PredictionCard({
                             key={idx}
                             component="li"
                             variant="body2"
-                            sx={{ color: '#e5e7eb', mb: 0.5, '&::marker': { color: '#9ca3af' } }}
+                            sx={{ color: 'text.primary', mb: 0.5, '&::marker': { color: 'text.secondary' } }}
                           >
                             {a}
                           </Typography>
@@ -835,7 +824,7 @@ export default function PredictionCard({
                   {/* NEXT 7 DAYS */}
                   {parsed.llm.next7Days.length > 0 ? (
                     <Box>
-                      <Typography variant="overline" sx={{ color: '#9ca3af' }}>
+                      <Typography variant="overline" sx={{ color: 'text.secondary' }}>
                         Next 7 days
                       </Typography>
                       <Box component="ul" sx={{ m: 0, mt: 0.75, pl: 2.5 }}>
@@ -844,7 +833,7 @@ export default function PredictionCard({
                             key={idx}
                             component="li"
                             variant="body2"
-                            sx={{ color: '#e5e7eb', mb: 0.5, '&::marker': { color: '#9ca3af' } }}
+                            sx={{ color: 'text.primary', mb: 0.5, '&::marker': { color: 'text.secondary' } }}
                           >
                             {a}
                           </Typography>
@@ -856,10 +845,10 @@ export default function PredictionCard({
                   {/* SAFETY */}
                   {parsed.llm.safety ? (
                     <Box>
-                      <Typography variant="overline" sx={{ color: '#9ca3af' }}>
+                      <Typography variant="overline" sx={{ color: 'text.secondary' }}>
                         Safety
                       </Typography>
-                      <Typography variant="body2" sx={{ color: '#e5e7eb', mt: 0.75 }}>
+                      <Typography variant="body2" sx={{ color: 'text.primary', mt: 0.75 }}>
                         {parsed.llm.safety}
                       </Typography>
                     </Box>
@@ -868,10 +857,10 @@ export default function PredictionCard({
                     {/* NOTES */}
                     {parsed.llm.other.length > 0 ? (
                       <Box>
-                        <Typography variant="overline" sx={{ color: '#9ca3af' }}>
+                        <Typography variant="overline" sx={{ color: 'text.secondary' }}>
                           Notes
                         </Typography>
-                        <Typography variant="body2" sx={{ color: '#e5e7eb', mt: 0.75, whiteSpace: 'pre-wrap' }}>
+                        <Typography variant="body2" sx={{ color: 'text.primary', mt: 0.75, whiteSpace: 'pre-wrap' }}>
                           {parsed.llm.other.join('\n')}
                         </Typography>
                       </Box>
@@ -904,25 +893,25 @@ export default function PredictionCard({
                           border: '2px solid rgba(59, 130, 246, 0.3)',
                         }}
                       >
-                        <CheckCircleIcon sx={{ fontSize: 32, color: '#3b82f6' }} />
+                        <CheckCircleIcon sx={{ fontSize: 32, color: 'info.main' }} />
                       </Box>
                       <Box sx={{ textAlign: 'center' }}>
-                        <Typography variant="body1" sx={{ color: '#e5e7eb', fontWeight: 600 }}>
+                        <Typography variant="body1" sx={{ color: 'text.primary', fontWeight: 600 }}>
                           Prediction Complete
                         </Typography>
-                        <Typography variant="caption" sx={{ color: '#9ca3af', display: 'block', mt: 0.5 }}>
+                        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.5 }}>
                           ML models analyzed successfully. Click "Prediction" to generate AI explanation.
                         </Typography>
                       </Box>
                     </>
                   ) : (
                     <>
-                      <PsychologyIcon sx={{ fontSize: 48, color: '#6b7280', opacity: 0.7 }} />
+                      <PsychologyIcon sx={{ fontSize: 48, color: 'text.disabled', opacity: 0.7 }} />
                       <Box sx={{ textAlign: 'center' }}>
-                        <Typography variant="body1" sx={{ color: '#9ca3af', fontWeight: 500 }}>
+                        <Typography variant="body1" sx={{ color: 'text.secondary', fontWeight: 500 }}>
                           No Explanation Available
                         </Typography>
-                        <Typography variant="caption" sx={{ color: '#6b7280', display: 'block', mt: 0.5 }}>
+                        <Typography variant="caption" sx={{ color: 'text.disabled', display: 'block', mt: 0.5 }}>
                           Click "Prediction" to run analysis and generate an AI explanation
                         </Typography>
                       </Box>
@@ -940,10 +929,10 @@ export default function PredictionCard({
                 bgcolor: alpha(theme.palette.background.paper, 0.06),
                 border: `1px solid ${alpha(theme.palette.divider, 0.25)}`,
                 overflow: 'auto',
-                color: '#e5e7eb',
+                color: 'text.primary',
               }}
             >
-              <Typography variant="subtitle2" sx={{ color: '#9ca3af', mb: 1 }}>
+              <Typography variant="subtitle2" sx={{ color: 'text.secondary', mb: 1 }}>
                 Predictions
               </Typography>
               {predictionSections.length ? (
@@ -951,7 +940,7 @@ export default function PredictionCard({
                   {predictionSections.map((section, sectionIdx) => (
                     <Box key={section.key}>
                       <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
-                        <Typography variant="subtitle2" sx={{ color: '#e5e7eb', fontWeight: 700 }}>
+                        <Typography variant="subtitle2" sx={{ color: 'text.primary', fontWeight: 700 }}>
                           {section.title}
                         </Typography>
                         {renderPredictionSectionHeader(section)}
@@ -963,7 +952,7 @@ export default function PredictionCard({
                               key={idx}
                               variant="body2"
                               sx={{
-                                color: '#e5e7eb',
+                                color: 'text.primary',
                                 whiteSpace: 'pre-wrap',
                                 fontFamily:
                                   'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
@@ -974,7 +963,7 @@ export default function PredictionCard({
                             </Typography>
                           ))
                         ) : (
-                          <Typography variant="body2" sx={{ color: '#9ca3af' }}>
+                          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
                             No data.
                           </Typography>
                         )}
@@ -986,7 +975,7 @@ export default function PredictionCard({
                   ))}
                 </Stack>
               ) : (
-                <Typography variant="body2" sx={{ color: '#9ca3af' }}>
+                <Typography variant="body2" sx={{ color: 'text.secondary' }}>
                   No predictions available.
                 </Typography>
               )}
@@ -1049,21 +1038,22 @@ export default function PredictionCard({
   if (!prediction && !loading) {
     return (
       <Card
-        sx={{
-          background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.8) 0%, rgba(17, 24, 39, 0.8) 100%)',
-          backdropFilter: 'blur(10px)',
-          border: '1px solid rgba(255, 255, 255, 0.1)',
+        sx={(theme) => ({
+          bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.75 : 0.95),
+          backdropFilter: theme.palette.mode === 'dark' ? 'blur(10px)' : undefined,
+          border: 1,
+          borderColor: 'divider',
           borderRadius: 2,
-        }}
+        })}
       >
         <CardHeader
           title={
-            <Typography variant="h6" sx={{ fontWeight: 600, color: '#f9fafb' }}>
+            <Typography variant="h6" sx={{ fontWeight: 600, color: 'text.primary' }}>
               MACHINE HEALTH PREDICTION
             </Typography>
           }
         />
-        <Divider sx={{ borderColor: 'rgba(255, 255, 255, 0.1)' }} />
+        <Divider sx={{ borderColor: 'divider' }} />
         <CardContent>
           <Box
             sx={{
@@ -1075,11 +1065,11 @@ export default function PredictionCard({
               gap: 3,
             }}
           >
-            <PsychologyIcon sx={{ fontSize: 80, color: '#6b7280' }} />
-            <Typography variant="h6" sx={{ color: '#9ca3af', textAlign: 'center' }}>
+            <PsychologyIcon sx={{ fontSize: 80, color: 'text.disabled' }} />
+            <Typography variant="h6" sx={{ color: 'text.secondary', textAlign: 'center' }}>
               No prediction yet
             </Typography>
-            <Typography variant="body2" sx={{ color: '#6b7280', textAlign: 'center', maxWidth: 400 }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary', textAlign: 'center', maxWidth: 400 }}>
               {canRunPrediction
                 ? 'Click the button below to run a health prediction for this machine using the latest sensor data.'
                 : predictionDisabledReason}
@@ -1088,24 +1078,12 @@ export default function PredictionCard({
               <span>
                 <Button
                   variant="contained"
+                  color="primary"
                   size="large"
                   startIcon={<PlayArrowIcon />}
                   onClick={onRunPrediction}
                   disabled={!canRunPrediction}
-                  sx={{
-                    mt: 2,
-                    background: canRunPrediction
-                      ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-                      : 'rgba(107, 114, 128, 0.3)',
-                    '&:hover': {
-                      background: canRunPrediction
-                        ? 'linear-gradient(135deg, #5568d3 0%, #63408b 100%)'
-                        : 'rgba(107, 114, 128, 0.3)',
-                    },
-                    '&.Mui-disabled': {
-                      color: 'rgba(255, 255, 255, 0.4)',
-                    },
-                  }}
+                  sx={{ mt: 2 }}
                 >
                   Run Prediction
                 </Button>
@@ -1124,34 +1102,35 @@ export default function PredictionCard({
   if (loading) {
     return (
       <Card
-        sx={{
-          background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.8) 0%, rgba(17, 24, 39, 0.8) 100%)',
-          backdropFilter: 'blur(10px)',
-          border: '1px solid rgba(255, 255, 255, 0.1)',
+        sx={(theme) => ({
+          bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.75 : 0.95),
+          backdropFilter: theme.palette.mode === 'dark' ? 'blur(10px)' : undefined,
+          border: 1,
+          borderColor: 'divider',
           borderRadius: 2,
-        }}
+        })}
       >
         <CardHeader
           title={
-            <Typography variant="h6" sx={{ fontWeight: 600, color: '#f9fafb' }}>
+            <Typography variant="h6" sx={{ fontWeight: 600, color: 'text.primary' }}>
               MACHINE HEALTH PREDICTION
             </Typography>
           }
           action={
-            <CircularProgress size={24} sx={{ color: '#667eea' }} />
+            <CircularProgress size={24} color="primary" />
           }
         />
-        <Divider sx={{ borderColor: 'rgba(255, 255, 255, 0.1)' }} />
+        <Divider sx={{ borderColor: 'divider' }} />
         <CardContent>
           <Grid container spacing={3}>
             <Grid item xs={12} md={6}>
-              <Skeleton variant="rectangular" height={200} sx={{ bgcolor: 'rgba(255, 255, 255, 0.05)', borderRadius: 2 }} />
+              <Skeleton variant="rectangular" height={200} sx={{ bgcolor: 'action.hover', borderRadius: 2 }} />
             </Grid>
             <Grid item xs={12} md={6}>
-              <Skeleton variant="rectangular" height={200} sx={{ bgcolor: 'rgba(255, 255, 255, 0.05)', borderRadius: 2 }} />
+              <Skeleton variant="rectangular" height={200} sx={{ bgcolor: 'action.hover', borderRadius: 2 }} />
             </Grid>
             <Grid item xs={12}>
-              <Skeleton variant="rectangular" height={150} sx={{ bgcolor: 'rgba(255, 255, 255, 0.05)', borderRadius: 2 }} />
+              <Skeleton variant="rectangular" height={150} sx={{ bgcolor: 'action.hover', borderRadius: 2 }} />
             </Grid>
           </Grid>
         </CardContent>
@@ -1165,23 +1144,24 @@ export default function PredictionCard({
 
   return (
     <Card
-      sx={{
-        background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.8) 0%, rgba(17, 24, 39, 0.8) 100%)',
-        backdropFilter: 'blur(10px)',
-        border: '1px solid rgba(255, 255, 255, 0.1)',
+      sx={(theme) => ({
+        bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.75 : 0.95),
+        backdropFilter: theme.palette.mode === 'dark' ? 'blur(10px)' : undefined,
+        border: 1,
+        borderColor: 'divider',
         borderRadius: 2,
-      }}
+      })}
     >
       {/* HEADER */}
       <CardHeader
         title={
-          <Typography variant="h6" sx={{ fontWeight: 600, color: '#f9fafb' }}>
+          <Typography variant="h6" sx={{ fontWeight: 600, color: 'text.primary' }}>
             MACHINE HEALTH PREDICTION
           </Typography>
         }
         subheader={
           <Stack direction="row" spacing={2} alignItems="center" sx={{ mt: 1 }}>
-            <Typography variant="body2" sx={{ color: '#9ca3af' }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
               Last prediction: {getRelativeTime(prediction!.timestamp)}
             </Typography>
             {autoRefresh && (
@@ -1203,31 +1183,20 @@ export default function PredictionCard({
             <span>
               <Button
                 variant="contained"
+                color="primary"
                 size="small"
                 startIcon={<PlayArrowIcon />}
                 onClick={onRunPrediction}
                 disabled={!canRunPrediction}
-                sx={{
-                  background: canRunPrediction
-                    ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-                    : 'rgba(107, 114, 128, 0.3)',
-                  '&:hover': {
-                    background: canRunPrediction
-                      ? 'linear-gradient(135deg, #5568d3 0%, #63408b 100%)'
-                      : 'rgba(107, 114, 128, 0.3)',
-                  },
-                  '&.Mui-disabled': {
-                    color: 'rgba(255, 255, 255, 0.4)',
-                  },
-                }}
-              >
+                sx={{ whiteSpace: 'nowrap' }}
+                >
                 Run Prediction
               </Button>
             </span>
           </Tooltip>
         }
       />
-      <Divider sx={{ borderColor: 'rgba(255, 255, 255, 0.1)' }} />
+      <Divider sx={{ borderColor: 'divider' }} />
 
       <CardContent>
         {/* HEALTH STATUS & RUL SECTION */}
@@ -1257,7 +1226,7 @@ export default function PredictionCard({
                 }),
               }}
             >
-              <Typography variant="overline" sx={{ color: '#9ca3af', fontWeight: 600 }}>
+              <Typography variant="overline" sx={{ color: 'text.secondary', fontWeight: 600 }}>
                 HEALTH STATUS
               </Typography>
 
@@ -1295,20 +1264,20 @@ export default function PredictionCard({
                     justifyContent: 'center',
                   }}
                 >
-                  <Typography variant="h6" sx={{ color: '#f9fafb', fontWeight: 700 }}>
+                  <Typography variant="h6" sx={{ color: 'text.primary', fontWeight: 700 }}>
                     {Math.round(prediction!.classification.confidence * 100)}%
                   </Typography>
                 </Box>
               </Box>
 
-              <Typography variant="body2" sx={{ color: '#d1d5db' }}>
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
                 Confidence Score
               </Typography>
 
               <Typography
                 variant="body1"
                 sx={{
-                  color: '#f9fafb',
+                  color: 'text.primary',
                   fontWeight: 500,
                   textAlign: 'center',
                   mt: 1,
@@ -1336,7 +1305,7 @@ export default function PredictionCard({
                   gap: 2,
                 }}
               >
-                <Typography variant="overline" sx={{ color: '#9ca3af', fontWeight: 600 }}>
+                <Typography variant="overline" sx={{ color: 'text.secondary', fontWeight: 600 }}>
                   REMAINING USEFUL LIFE
                 </Typography>
 
@@ -1346,7 +1315,7 @@ export default function PredictionCard({
                   {Math.round(prediction!.rul.rul_hours)} hours
                 </Typography>
 
-                <Typography variant="h6" sx={{ color: '#d1d5db' }}>
+                <Typography variant="h6" sx={{ color: 'text.secondary' }}>
                   ({prediction!.rul.rul_days.toFixed(1)} days)
                 </Typography>
 
@@ -1363,7 +1332,7 @@ export default function PredictionCard({
                 <Typography
                   variant="body2"
                   sx={{
-                    color: '#d1d5db',
+                    color: 'text.secondary',
                     textAlign: 'center',
                     mt: 1,
                   }}
@@ -1371,7 +1340,7 @@ export default function PredictionCard({
                   {urgencyConfig!.description}
                 </Typography>
 
-                <Typography variant="body2" sx={{ color: '#9ca3af' }}>
+                <Typography variant="body2" sx={{ color: 'text.disabled' }}>
                   {prediction!.rul.maintenance_window}
                 </Typography>
               </Box>
@@ -1381,16 +1350,17 @@ export default function PredictionCard({
 
         {/* FAILURE TYPE PROBABILITIES */}
         <Box
-          sx={{
+          sx={(theme) => ({
             p: 3,
             borderRadius: 2,
-            background: 'rgba(31, 41, 55, 0.5)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-          }}
+            bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.5 : 0.8),
+            border: 1,
+            borderColor: 'divider',
+          })}
         >
           <Typography
             variant="subtitle1"
-            sx={{ color: '#f9fafb', fontWeight: 600, mb: 2 }}
+            sx={{ color: 'text.primary', fontWeight: 600, mb: 2 }}
           >
             FAILURE TYPE PROBABILITIES
           </Typography>
@@ -1405,20 +1375,20 @@ export default function PredictionCard({
                     mb: 0.5,
                   }}
                 >
-                  <Typography variant="body2" sx={{ color: '#d1d5db', fontWeight: 500 }}>
+                  <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 500 }}>
                     {type}
                   </Typography>
-                  <Typography variant="body2" sx={{ color: '#f9fafb', fontWeight: 600 }}>
+                  <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 600 }}>
                     {Math.round(probability * 100)}%
                   </Typography>
                 </Box>
                 <LinearProgress
                   variant="determinate"
                   value={probability * 100}
-                  sx={{
+                  sx={(theme) => ({
                     height: 8,
                     borderRadius: 4,
-                    bgcolor: 'rgba(255, 255, 255, 0.1)',
+                    bgcolor: alpha(theme.palette.text.disabled, 0.15),
                     '& .MuiLinearProgress-bar': {
                       borderRadius: 4,
                       background:
@@ -1430,7 +1400,7 @@ export default function PredictionCard({
                           ? 'linear-gradient(90deg, #fbbf24 0%, #f59e0b 100%)'
                           : 'linear-gradient(90deg, #10b981 0%, #059669 100%)',
                     },
-                  }}
+                  })}
                 />
               </Box>
             ))}

@@ -27,6 +27,7 @@ import {
   InputAdornment,
   IconButton,
 } from '@mui/material';
+import { useTheme, alpha } from '@mui/material/styles';
 import {
   Warning as WarningIcon,
   Visibility,
@@ -56,6 +57,7 @@ export const SecureDeleteDialog: React.FC<SecureDeleteDialogProps> = ({
   itemName,
   confirmButtonText = 'Delete',
 }) => {
+  const theme = useTheme();
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [verifying, setVerifying] = useState(false);
@@ -134,14 +136,15 @@ export const SecureDeleteDialog: React.FC<SecureDeleteDialogProps> = ({
       fullWidth
       PaperProps={{
         sx: {
-          background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.95) 0%, rgba(17, 24, 39, 0.95) 100%)',
-          border: '1px solid rgba(239, 68, 68, 0.3)',
+          bgcolor: 'background.paper',
+          border: 1,
+          borderColor: alpha(theme.palette.error.main, theme.palette.mode === 'dark' ? 0.35 : 0.5),
         },
       }}
     >
       <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
         <WarningIcon sx={{ color: 'error.main' }} />
-        <Typography variant="h6" component="span" sx={{ color: '#f87171' }}>
+        <Typography variant="h6" component="span" sx={{ color: 'text.primary' }}>
           {title}
         </Typography>
       </DialogTitle>
@@ -149,13 +152,13 @@ export const SecureDeleteDialog: React.FC<SecureDeleteDialogProps> = ({
       <DialogContent>
         <Box sx={{ mb: 2 }}>
           {description && (
-            <Typography variant="body2" sx={{ color: '#9ca3af', mb: 1 }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1 }}>
               {description}
             </Typography>
           )}
           {itemName && (
-            <Typography variant="body1" sx={{ color: '#e5e7eb', fontWeight: 600, mb: 2 }}>
-              Target: <span style={{ color: '#f87171' }}>{itemName}</span>
+            <Typography variant="body1" sx={{ color: 'text.primary', fontWeight: 600, mb: 2 }}>
+              Target: <span style={{ color: theme.palette.error.main }}>{itemName}</span>
             </Typography>
           )}
           <Alert severity="warning" sx={{ mb: 2 }}>
@@ -177,7 +180,7 @@ export const SecureDeleteDialog: React.FC<SecureDeleteDialogProps> = ({
           InputProps={{
             startAdornment: (
               <InputAdornment position="start">
-                <LockIcon sx={{ color: '#6b7280' }} />
+                <LockIcon color="action" />
               </InputAdornment>
             ),
             endAdornment: (

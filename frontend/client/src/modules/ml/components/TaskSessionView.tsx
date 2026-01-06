@@ -1,4 +1,5 @@
 import { Box, Chip, Divider, LinearProgress, Paper, Stack, Typography } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 
 import { useTaskSession } from '../context/TaskSessionContext';
 import { useDashboard } from '../context/DashboardContext';
@@ -18,19 +19,20 @@ export default function TaskSessionView() {
     <Box>
       <Paper
         elevation={3}
-        sx={{
+        sx={(theme) => ({
           p: 3,
-          background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.8) 0%, rgba(17, 24, 39, 0.8) 100%)',
-          backdropFilter: 'blur(10px)',
-          border: '1px solid rgba(255, 255, 255, 0.1)',
-        }}
+          bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.75 : 0.95),
+          backdropFilter: theme.palette.mode === 'dark' ? 'blur(10px)' : undefined,
+          border: 1,
+          borderColor: 'divider',
+        })}
       >
         <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={2}>
           <Box>
-            <Typography variant="h5" sx={{ fontWeight: 700, color: '#e5e7eb' }}>
+            <Typography variant="h5" sx={{ fontWeight: 700, color: 'text.primary' }}>
               Tasks
             </Typography>
-            <Typography variant="body2" sx={{ color: '#9ca3af' }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
               Running and completed tasks for this session.
             </Typography>
           </Box>
@@ -41,10 +43,10 @@ export default function TaskSessionView() {
           </Stack>
         </Stack>
 
-        <Divider sx={{ my: 2, bgcolor: 'rgba(255, 255, 255, 0.08)' }} />
+        <Divider sx={{ my: 2, borderColor: 'divider' }} />
 
         {runningTasks.length === 0 && completedTasks.length === 0 && (
-          <Typography variant="body2" sx={{ color: '#6b7280' }}>
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
             No tasks started yet.
           </Typography>
         )}

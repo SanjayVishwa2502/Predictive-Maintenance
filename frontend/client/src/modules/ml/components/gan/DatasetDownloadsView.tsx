@@ -18,6 +18,7 @@ import {
   IconButton,
   CircularProgress,
 } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import { 
   Download as DownloadIcon, 
   Refresh as RefreshIcon,
@@ -150,19 +151,20 @@ export default function DatasetDownloadsView({ userRole }: DatasetDownloadsViewP
     <Box>
       <Paper
         elevation={3}
-        sx={{
+        sx={(theme) => ({
           p: 3,
-          background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.8) 0%, rgba(17, 24, 39, 0.8) 100%)',
-          backdropFilter: 'blur(10px)',
-          border: '1px solid rgba(255, 255, 255, 0.1)',
-        }}
+          bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.75 : 0.95),
+          backdropFilter: theme.palette.mode === 'dark' ? 'blur(10px)' : undefined,
+          border: 1,
+          borderColor: 'divider',
+        })}
       >
         <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={2}>
           <Box>
-            <Typography variant="h5" sx={{ fontWeight: 700, color: '#e5e7eb' }}>
+            <Typography variant="h5" sx={{ fontWeight: 700, color: 'text.primary' }}>
               Downloads
             </Typography>
-            <Typography variant="body2" sx={{ color: '#9ca3af' }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
               Download GAN synthetic parquet splits (train/val/test).
             </Typography>
           </Box>
@@ -172,7 +174,7 @@ export default function DatasetDownloadsView({ userRole }: DatasetDownloadsViewP
           </Button>
         </Stack>
 
-        <Divider sx={{ my: 2, bgcolor: 'rgba(255, 255, 255, 0.08)' }} />
+        <Divider sx={{ my: 2, borderColor: 'divider' }} />
 
         {loading && <LinearProgress />}
         {error && (
@@ -232,26 +234,28 @@ export default function DatasetDownloadsView({ userRole }: DatasetDownloadsViewP
         maxWidth="sm"
         fullWidth
         PaperProps={{
-          sx: {
-            background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.95) 0%, rgba(17, 24, 39, 0.95) 100%)',
-            border: '1px solid rgba(102, 126, 234, 0.3)',
-          },
+          sx: (theme) => ({
+            bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.95 : 1),
+            border: 1,
+            borderColor: 'primary.main',
+            borderRadius: 2,
+          }),
         }}
       >
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          <LockIcon sx={{ color: '#667eea' }} />
-          <Typography variant="h6" component="span" sx={{ color: '#e5e7eb' }}>
+          <LockIcon sx={{ color: 'primary.main' }} />
+          <Typography variant="h6" component="span" sx={{ color: 'text.primary' }}>
             Confirm Download
           </Typography>
         </DialogTitle>
 
         <DialogContent>
           <Box sx={{ mb: 2 }}>
-            <Typography variant="body2" sx={{ color: '#9ca3af', mb: 1 }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1 }}>
               Enter your password to download the dataset.
             </Typography>
-            <Typography variant="body1" sx={{ color: '#e5e7eb', fontWeight: 600, mb: 2 }}>
-              Machine: <span style={{ color: '#667eea' }}>{selectedMachineId}</span>
+            <Typography variant="body1" sx={{ color: 'text.primary', fontWeight: 600, mb: 2 }}>
+              Machine: <Box component="span" sx={{ color: 'primary.main' }}>{selectedMachineId}</Box>
             </Typography>
             <Alert severity="warning" icon={<WarningIcon />} sx={{ mb: 2 }}>
               Dataset downloads are logged and restricted to administrators only.

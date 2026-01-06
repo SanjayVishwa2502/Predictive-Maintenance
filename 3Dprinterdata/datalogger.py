@@ -9,7 +9,7 @@ import paho.mqtt.client as mqtt
 
 # --- CONFIGURATION ---
 # Override via environment variables for different printers / brokers.
-MQTT_BROKER = os.environ.get("PM_MQTT_BROKER", "192.168.55.79")
+MQTT_BROKER = os.environ.get("PM_MQTT_BROKER", "192.168.201.95")
 MQTT_PORT = int(os.environ.get("PM_MQTT_PORT", "1883"))
 TOPIC_BASE = os.environ.get("PM_MQTT_TOPIC", "octoPrint/#")
 

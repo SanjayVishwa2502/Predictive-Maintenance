@@ -314,41 +314,39 @@ export default function SensorCharts({
 
   return (
     <Card
-      sx={{
-        background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.8) 0%, rgba(17, 24, 39, 0.8) 100%)',
-        backdropFilter: 'blur(10px)',
-        border: '1px solid rgba(255, 255, 255, 0.1)',
+      sx={(theme) => ({
+        bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.75 : 0.95),
+        backdropFilter: theme.palette.mode === 'dark' ? 'blur(10px)' : undefined,
+        border: 1,
+        borderColor: 'divider',
         borderRadius: 2,
-      }}
+      })}
     >
       {/* HEADER */}
       <CardHeader
         title={
-          <Typography variant="h6" sx={{ fontWeight: 600, color: '#f9fafb' }}>
+          <Typography variant="h6" sx={{ fontWeight: 600, color: 'text.primary' }}>
             SENSOR TREND ANALYSIS
           </Typography>
         }
         subheader={
-          <Typography variant="body2" sx={{ color: '#9ca3af', mt: 0.5 }}>
+          <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
             Last {Math.floor(maxDataPoints * 5 / 60)} minutes • {chartData.length} data points
           </Typography>
         }
       />
-      <Divider sx={{ borderColor: 'rgba(255, 255, 255, 0.1)' }} />
+      <Divider sx={{ borderColor: 'divider' }} />
 
       <CardContent>
         {/* SENSOR SELECTION */}
         <FormControl
           fullWidth
-          sx={{
+          sx={(theme) => ({
             mb: 3,
             '& .MuiOutlinedInput-root': {
-              bgcolor: 'rgba(31, 41, 55, 0.5)',
-              '& fieldset': { borderColor: 'rgba(255, 255, 255, 0.2)' },
-              '&:hover fieldset': { borderColor: 'rgba(255, 255, 255, 0.3)' },
+              bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.5 : 0.9),
             },
-            '& .MuiInputLabel-root': { color: '#d1d5db' },
-          }}
+          })}
         >
           <InputLabel>Select Sensors (Max 5)</InputLabel>
           <Select

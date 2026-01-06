@@ -37,6 +37,7 @@ import {
   DialogContent,
   DialogActions,
 } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import type { SelectChangeEvent } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
 import type { GridColDef, GridRenderCellParams } from '@mui/x-data-grid';
@@ -314,7 +315,7 @@ export default function PredictionHistory({
       headerName: 'Timestamp',
       width: 150,
       renderCell: (params: GridRenderCellParams) => (
-        <Typography variant="body2" sx={{ color: '#d1d5db' }}>
+        <Typography variant="body2" sx={{ color: 'text.primary' }}>
           {formatTimestamp(params.row.timestamp)}
         </Typography>
       ),
@@ -369,7 +370,7 @@ export default function PredictionHistory({
       headerName: 'Run ID',
       width: 260,
       renderCell: (params: GridRenderCellParams) => (
-        <Typography variant="body2" sx={{ color: params.row.run_id ? '#d1d5db' : '#6b7280' }}>
+        <Typography variant="body2" sx={{ color: params.row.run_id ? 'text.primary' : 'text.disabled' }}>
           {params.row.run_id ? String(params.row.run_id) : '—'}
         </Typography>
       ),
@@ -385,7 +386,7 @@ export default function PredictionHistory({
         const entries = Object.entries(snap);
         if (!entries.length) {
           return (
-            <Typography variant="body2" sx={{ color: '#6b7280' }}>
+            <Typography variant="body2" sx={{ color: 'text.disabled' }}>
               —
             </Typography>
           );
@@ -401,7 +402,7 @@ export default function PredictionHistory({
             variant="body2"
             title={full}
             sx={{
-              color: '#d1d5db',
+              color: 'text.primary',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -430,10 +431,12 @@ export default function PredictionHistory({
                   e.stopPropagation();
                   void openDetails(params.row);
                 }}
-                sx={{
-                  color: canView ? '#667eea' : '#6b7280',
-                  '&:hover': { bgcolor: canView ? 'rgba(102, 126, 234, 0.1)' : 'transparent' },
-                }}
+                sx={(theme) => ({
+                  color: canView ? theme.palette.primary.main : theme.palette.text.disabled,
+                  '&:hover': {
+                    bgcolor: canView ? alpha(theme.palette.primary.main, 0.12) : 'transparent',
+                  },
+                })}
               >
                 <ViewIcon />
               </IconButton>
@@ -450,22 +453,23 @@ export default function PredictionHistory({
 
   return (
     <Card
-      sx={{
-        background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.8) 0%, rgba(17, 24, 39, 0.8) 100%)',
-        backdropFilter: 'blur(10px)',
-        border: '1px solid rgba(255, 255, 255, 0.1)',
+      sx={(theme) => ({
+        bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.75 : 0.95),
+        backdropFilter: theme.palette.mode === 'dark' ? 'blur(10px)' : undefined,
+        border: 1,
+        borderColor: 'divider',
         borderRadius: 2,
-      }}
+      })}
     >
       {/* HEADER */}
       <CardHeader
         title={
-          <Typography variant="h6" sx={{ fontWeight: 600, color: '#f9fafb' }}>
+          <Typography variant="h6" sx={{ fontWeight: 600, color: 'text.primary' }}>
             PREDICTION HISTORY
           </Typography>
         }
         subheader={
-          <Typography variant="body2" sx={{ color: '#9ca3af', mt: 0.5 }}>
+          <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
             Last {limit} snapshots • {filteredPredictions.length} shown
           </Typography>
         }
@@ -483,35 +487,28 @@ export default function PredictionHistory({
             InputProps={{
               startAdornment: (
                 <InputAdornment position="start">
-                  <SearchIcon sx={{ color: '#9ca3af' }} />
+                  <SearchIcon sx={{ color: 'text.secondary' }} />
                 </InputAdornment>
               ),
             }}
-            sx={{
+            sx={(theme) => ({
               flex: 1,
               minWidth: 200,
               '& .MuiOutlinedInput-root': {
-                bgcolor: 'rgba(31, 41, 55, 0.5)',
-                '& fieldset': { borderColor: 'rgba(255, 255, 255, 0.2)' },
-                '&:hover fieldset': { borderColor: 'rgba(255, 255, 255, 0.3)' },
-                '& input': { color: '#d1d5db' },
+                bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.5 : 0.9),
               },
-            }}
+            })}
           />
 
           {/* Date Range Filter */}
           <FormControl
             size="small"
-            sx={{
+            sx={(theme) => ({
               minWidth: 150,
               '& .MuiOutlinedInput-root': {
-                bgcolor: 'rgba(31, 41, 55, 0.5)',
-                '& fieldset': { borderColor: 'rgba(255, 255, 255, 0.2)' },
-                '&:hover fieldset': { borderColor: 'rgba(255, 255, 255, 0.3)' },
+                bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.5 : 0.9),
               },
-              '& .MuiInputLabel-root': { color: '#d1d5db' },
-              '& .MuiSelect-select': { color: '#d1d5db' },
-            }}
+            })}
           >
             <InputLabel>Date Range</InputLabel>
             <Select value={dateRange} onChange={handleDateRangeChange} label="Date Range">
@@ -526,16 +523,12 @@ export default function PredictionHistory({
           {/* Explanation Filter */}
           <FormControl
             size="small"
-            sx={{
+            sx={(theme) => ({
               minWidth: 190,
               '& .MuiOutlinedInput-root': {
-                bgcolor: 'rgba(31, 41, 55, 0.5)',
-                '& fieldset': { borderColor: 'rgba(255, 255, 255, 0.2)' },
-                '&:hover fieldset': { borderColor: 'rgba(255, 255, 255, 0.3)' },
+                bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.5 : 0.9),
               },
-              '& .MuiInputLabel-root': { color: '#d1d5db' },
-              '& .MuiSelect-select': { color: '#d1d5db' },
-            }}
+            })}
           >
             <InputLabel>Explanation</InputLabel>
             <Select value={explanationFilter} onChange={handleExplanationFilterChange} label="Explanation">
@@ -548,15 +541,8 @@ export default function PredictionHistory({
           {/* View dataset (server-collected CSV) */}
           <Button
             variant="outlined"
+            color="primary"
             onClick={() => viewLatestDataset(machineId, sessionId)}
-            sx={{
-              borderColor: '#667eea',
-              color: '#667eea',
-              '&:hover': {
-                borderColor: '#5568d3',
-                bgcolor: 'rgba(102, 126, 234, 0.1)',
-              },
-            }}
           >
             View Dataset
           </Button>
@@ -575,22 +561,23 @@ export default function PredictionHistory({
 
         {/* DATA GRID */}
         <Box
-          sx={{
+          sx={(theme) => ({
             height: 600,
             width: '100%',
             '& .MuiDataGrid-root': {
-              border: '1px solid rgba(255, 255, 255, 0.1)',
+              border: 1,
+              borderColor: 'divider',
               borderRadius: 1,
-              bgcolor: 'rgba(31, 41, 55, 0.5)',
+              bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.5 : 0.9),
             },
             '& .MuiDataGrid-cell': {
-              borderColor: 'rgba(255, 255, 255, 0.1)',
-              color: '#d1d5db',
+              borderColor: 'divider',
+              color: 'text.primary',
             },
             '& .MuiDataGrid-columnHeaders': {
-              bgcolor: 'rgba(102, 126, 234, 0.1)',
-              borderColor: 'rgba(255, 255, 255, 0.1)',
-              color: '#f9fafb',
+              bgcolor: alpha(theme.palette.primary.main, 0.1),
+              borderColor: 'divider',
+              color: 'text.primary',
             },
             '& .MuiDataGrid-columnHeaderTitle': {
               fontWeight: 600,
@@ -598,20 +585,20 @@ export default function PredictionHistory({
             '& .MuiDataGrid-row': {
               cursor: 'pointer',
               '&:hover': {
-                bgcolor: 'rgba(102, 126, 234, 0.1)',
+                bgcolor: alpha(theme.palette.primary.main, 0.1),
               },
             },
             '& .MuiDataGrid-footerContainer': {
-              borderColor: 'rgba(255, 255, 255, 0.1)',
-              bgcolor: 'rgba(31, 41, 55, 0.5)',
+              borderColor: 'divider',
+              bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.5 : 0.9),
             },
             '& .MuiTablePagination-root': {
-              color: '#d1d5db',
+              color: 'text.secondary',
             },
             '& .MuiDataGrid-overlay': {
-              bgcolor: 'rgba(31, 41, 55, 0.95)',
+              bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.95 : 1),
             },
-          }}
+          })}
         >
           <DataGrid
             rows={filteredPredictions}
@@ -645,70 +632,71 @@ export default function PredictionHistory({
         maxWidth="sm"
         fullWidth
         PaperProps={{
-          sx: {
-            background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.95) 0%, rgba(17, 24, 39, 0.95) 100%)',
-            backdropFilter: 'blur(20px)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
+          sx: (theme) => ({
+            bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.95 : 1),
+            backdropFilter: theme.palette.mode === 'dark' ? 'blur(20px)' : undefined,
+            border: 1,
+            borderColor: 'divider',
             borderRadius: 2,
-          },
+          }),
         }}
       >
         {selectedPrediction && (
           <>
-            <DialogTitle sx={{ borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
-              <Typography variant="h6" sx={{ fontWeight: 600, color: '#f9fafb' }}>
+            <DialogTitle sx={{ borderBottom: 1, borderColor: 'divider' }}>
+              <Typography variant="h6" sx={{ fontWeight: 600, color: 'text.primary' }}>
                 Run Details
               </Typography>
-              <Typography variant="body2" sx={{ color: '#9ca3af', mt: 0.5 }}>
+              <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
                 {formatTimestamp(selectedPrediction.timestamp)}
               </Typography>
             </DialogTitle>
             <DialogContent sx={{ mt: 2 }}>
               <Stack spacing={2}>
                 <Box>
-                  <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                     Data Stamp
                   </Typography>
-                  <Typography variant="body2" sx={{ color: '#d1d5db', mt: 0.5 }}>
+                  <Typography variant="body2" sx={{ color: 'text.primary', mt: 0.5 }}>
                     {selectedPrediction.data_stamp || '—'}
                   </Typography>
                 </Box>
 
                 <Box>
-                  <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                     Run ID
                   </Typography>
-                  <Typography variant="body2" sx={{ color: '#d1d5db', mt: 0.5 }}>
+                  <Typography variant="body2" sx={{ color: 'text.primary', mt: 0.5 }}>
                     {selectedPrediction.run_id || '—'}
                   </Typography>
                 </Box>
 
                 {detailsLoading && (
-                  <Typography variant="body2" sx={{ color: '#9ca3af' }}>
+                  <Typography variant="body2" sx={{ color: 'text.secondary' }}>
                     Loading run details...
                   </Typography>
                 )}
 
                 {detailsError && (
-                  <Typography variant="body2" sx={{ color: '#f97316' }}>
+                  <Typography variant="body2" color="warning">
                     {detailsError}
                   </Typography>
                 )}
 
                 {(selectedPrediction.sensor_snapshot || runDetails?.sensor_data) && (
                   <Box>
-                    <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                       Observed Data (Snapshot)
                     </Typography>
                     <Typography
                       variant="body2"
                       component="pre"
                       sx={{
-                        color: '#d1d5db',
+                        color: 'text.primary',
                         mt: 0.5,
                         p: 1,
                         borderRadius: 1,
-                        bgcolor: 'rgba(0,0,0,0.25)',
+                        bgcolor: 'action.hover',
                         maxHeight: 180,
                         overflow: 'auto',
                         whiteSpace: 'pre-wrap',
@@ -724,18 +712,18 @@ export default function PredictionHistory({
                 {runDetails && (
                   <>
                     <Box>
-                      <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                      <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                         Predictions (All)
                       </Typography>
                       <Typography
                         variant="body2"
                         component="pre"
                         sx={{
-                          color: '#d1d5db',
+                          color: 'text.primary',
                           mt: 0.5,
                           p: 1,
                           borderRadius: 1,
-                          bgcolor: 'rgba(0,0,0,0.25)',
+                          bgcolor: 'action.hover',
                           maxHeight: 200,
                           overflow: 'auto',
                           whiteSpace: 'pre-wrap',
@@ -747,18 +735,18 @@ export default function PredictionHistory({
                     </Box>
 
                     <Box>
-                      <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                      <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                         LLM Outputs (All)
                       </Typography>
                       <Typography
                         variant="body2"
                         component="pre"
                         sx={{
-                          color: '#d1d5db',
+                          color: 'text.primary',
                           mt: 0.5,
                           p: 1,
                           borderRadius: 1,
-                          bgcolor: 'rgba(0,0,0,0.25)',
+                          bgcolor: 'action.hover',
                           maxHeight: 220,
                           overflow: 'auto',
                           whiteSpace: 'pre-wrap',
@@ -772,14 +760,11 @@ export default function PredictionHistory({
                 )}
               </Stack>
             </DialogContent>
-            <DialogActions sx={{ borderTop: '1px solid rgba(255, 255, 255, 0.1)', p: 2 }}>
+            <DialogActions sx={{ borderTop: 1, borderColor: 'divider', p: 2 }}>
               <Button
                 variant="contained"
+                color="primary"
                 onClick={() => setDetailsOpen(false)}
-                sx={{
-                  bgcolor: '#667eea',
-                  '&:hover': { bgcolor: '#5568d3' },
-                }}
               >
                 Close
               </Button>

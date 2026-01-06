@@ -31,6 +31,7 @@ import {
   Slide,
   Chip,
 } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import type { TransitionProps } from '@mui/material/transitions';
 import {
   Close as CloseIcon,
@@ -337,14 +338,14 @@ export default function LLMExplanationModal({
             variant="text"
             width="40%"
             height={32}
-            sx={{ bgcolor: 'rgba(255, 255, 255, 0.1)' }}
+            sx={{ bgcolor: 'action.hover' }}
           />
           {[1, 2, 3].map((i) => (
             <Skeleton
               key={i}
               variant="rectangular"
               height={40}
-              sx={{ bgcolor: 'rgba(255, 255, 255, 0.1)', borderRadius: 1, mt: 1 }}
+              sx={{ bgcolor: 'action.hover', borderRadius: 1, mt: 1 }}
             />
           ))}
         </Box>
@@ -356,23 +357,20 @@ export default function LLMExplanationModal({
     <Box sx={{ py: 4, textAlign: 'center' }}>
       <Alert
         severity="error"
-        sx={{
-          bgcolor: 'rgba(239, 68, 68, 0.1)',
-          border: '1px solid rgba(239, 68, 68, 0.3)',
-          color: '#fca5a5',
-        }}
+        sx={(theme) => ({
+          bgcolor: alpha(theme.palette.error.main, theme.palette.mode === 'dark' ? 0.12 : 0.08),
+          border: 1,
+          borderColor: alpha(theme.palette.error.main, 0.35),
+        })}
       >
         {error}
       </Alert>
       <Button
         variant="contained"
+        color="primary"
         startIcon={<RetryIcon />}
         onClick={handleRetry}
-        sx={{
-          mt: 3,
-          bgcolor: '#667eea',
-          '&:hover': { bgcolor: '#5568d3' },
-        }}
+        sx={{ mt: 3 }}
       >
         Retry
       </Button>
@@ -389,21 +387,22 @@ export default function LLMExplanationModal({
           elevation={0}
           sx={{
             p: 3,
-            background: 'linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
+            bgcolor: (theme) => alpha(theme.palette.primary.main, theme.palette.mode === 'dark' ? 0.12 : 0.08),
+            border: 1,
+            borderColor: 'divider',
             borderRadius: 2,
           }}
         >
           <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
-            <BrainIcon sx={{ color: '#667eea' }} />
-            <Typography variant="h6" sx={{ fontWeight: 600, color: '#f9fafb' }}>
+            <BrainIcon color="primary" />
+            <Typography variant="h6" sx={{ fontWeight: 600, color: 'text.primary' }}>
               AI Analysis Summary
             </Typography>
           </Stack>
           <Typography
             variant="body1"
             sx={{
-              color: '#d1d5db',
+              color: 'text.secondary',
               lineHeight: 1.7,
               '& p': { mb: 1 },
             }}
@@ -417,14 +416,15 @@ export default function LLMExplanationModal({
           elevation={0}
           sx={{
             p: 3,
-            background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, rgba(220, 38, 38, 0.1) 100%)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
+            bgcolor: (theme) => alpha(theme.palette.error.main, theme.palette.mode === 'dark' ? 0.12 : 0.08),
+            border: 1,
+            borderColor: 'divider',
             borderRadius: 2,
           }}
         >
           <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
-            <WarningIcon sx={{ color: '#ef4444' }} />
-            <Typography variant="h6" sx={{ fontWeight: 600, color: '#f9fafb' }}>
+            <WarningIcon sx={{ color: 'error.main' }} />
+            <Typography variant="h6" sx={{ fontWeight: 600, color: 'text.primary' }}>
               Risk Factors
             </Typography>
           </Stack>
@@ -432,26 +432,23 @@ export default function LLMExplanationModal({
             {explanation.risk_factors.map((factor, index) => (
               <Box
                 key={index}
-                sx={{
+                sx={(theme) => ({
                   display: 'flex',
                   gap: 1.5,
                   p: 1.5,
-                  bgcolor: 'rgba(31, 41, 55, 0.5)',
+                  bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.5 : 0.7),
                   borderRadius: 1,
-                  border: '1px solid rgba(239, 68, 68, 0.2)',
-                }}
+                  border: 1,
+                  borderColor: alpha(theme.palette.error.main, 0.25),
+                })}
               >
                 <Chip
                   label={index + 1}
                   size="small"
-                  sx={{
-                    bgcolor: '#ef4444',
-                    color: '#fff',
-                    fontWeight: 600,
-                    minWidth: 28,
-                  }}
+                  color="error"
+                  sx={{ fontWeight: 600, minWidth: 28 }}
                 />
-                <Typography variant="body2" sx={{ color: '#d1d5db', flex: 1 }}>
+                <Typography variant="body2" sx={{ color: 'text.secondary', flex: 1 }}>
                   <ReactMarkdown>{factor}</ReactMarkdown>
                 </Typography>
               </Box>
@@ -464,14 +461,15 @@ export default function LLMExplanationModal({
           elevation={0}
           sx={{
             p: 3,
-            background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(5, 150, 105, 0.1) 100%)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
+            bgcolor: (theme) => alpha(theme.palette.success.main, theme.palette.mode === 'dark' ? 0.12 : 0.08),
+            border: 1,
+            borderColor: 'divider',
             borderRadius: 2,
           }}
         >
           <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
-            <RecommendIcon sx={{ color: '#10b981' }} />
-            <Typography variant="h6" sx={{ fontWeight: 600, color: '#f9fafb' }}>
+            <RecommendIcon sx={{ color: 'success.main' }} />
+            <Typography variant="h6" sx={{ fontWeight: 600, color: 'text.primary' }}>
               Recommendations
             </Typography>
           </Stack>
@@ -479,26 +477,23 @@ export default function LLMExplanationModal({
             {explanation.recommendations.map((recommendation, index) => (
               <Box
                 key={index}
-                sx={{
+                sx={(theme) => ({
                   display: 'flex',
                   gap: 1.5,
                   p: 1.5,
-                  bgcolor: 'rgba(31, 41, 55, 0.5)',
+                  bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.5 : 0.7),
                   borderRadius: 1,
-                  border: '1px solid rgba(16, 185, 129, 0.2)',
-                }}
+                  border: 1,
+                  borderColor: alpha(theme.palette.success.main, 0.25),
+                })}
               >
                 <Chip
                   label={index + 1}
                   size="small"
-                  sx={{
-                    bgcolor: '#10b981',
-                    color: '#fff',
-                    fontWeight: 600,
-                    minWidth: 28,
-                  }}
+                  color="success"
+                  sx={{ fontWeight: 600, minWidth: 28 }}
                 />
-                <Typography variant="body2" sx={{ color: '#d1d5db', flex: 1 }}>
+                <Typography variant="body2" sx={{ color: 'text.secondary', flex: 1 }}>
                   <ReactMarkdown>{recommendation}</ReactMarkdown>
                 </Typography>
               </Box>
@@ -512,15 +507,16 @@ export default function LLMExplanationModal({
             elevation={0}
             sx={{
               p: 3,
-              bgcolor: 'rgba(31, 41, 55, 0.5)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
+              bgcolor: 'background.paper',
+              border: 1,
+              borderColor: 'divider',
               borderRadius: 2,
             }}
           >
-            <Typography variant="h6" sx={{ fontWeight: 600, color: '#f9fafb', mb: 2 }}>
+            <Typography variant="h6" sx={{ fontWeight: 600, color: 'text.primary', mb: 2 }}>
               Technical Details
             </Typography>
-            <Typography variant="body2" sx={{ color: '#9ca3af', lineHeight: 1.7 }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary', lineHeight: 1.7 }}>
               <ReactMarkdown>{explanation.technical_details}</ReactMarkdown>
             </Typography>
           </Paper>
@@ -532,15 +528,16 @@ export default function LLMExplanationModal({
             elevation={0}
             sx={{
               p: 3,
-              bgcolor: 'rgba(31, 41, 55, 0.5)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
+              bgcolor: 'background.paper',
+              border: 1,
+              borderColor: 'divider',
               borderRadius: 2,
             }}
           >
-            <Typography variant="h6" sx={{ fontWeight: 600, color: '#f9fafb', mb: 2 }}>
+            <Typography variant="h6" sx={{ fontWeight: 600, color: 'text.primary', mb: 2 }}>
               Confidence Analysis
             </Typography>
-            <Typography variant="body2" sx={{ color: '#9ca3af', lineHeight: 1.7 }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary', lineHeight: 1.7 }}>
               <ReactMarkdown>{explanation.confidence_analysis}</ReactMarkdown>
             </Typography>
           </Paper>
@@ -561,19 +558,20 @@ export default function LLMExplanationModal({
       maxWidth="md"
       fullWidth
       PaperProps={{
-        sx: {
-          background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.95) 0%, rgba(17, 24, 39, 0.95) 100%)',
-          backdropFilter: 'blur(20px)',
-          border: '1px solid rgba(255, 255, 255, 0.1)',
+        sx: (theme) => ({
+          bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.9 : 0.98),
+          backdropFilter: theme.palette.mode === 'dark' ? 'blur(20px)' : undefined,
+          border: 1,
+          borderColor: 'divider',
           borderRadius: 3,
           maxHeight: '90vh',
-        },
+        }),
       }}
       BackdropProps={{
-        sx: {
-          backdropFilter: 'blur(8px)',
-          backgroundColor: 'rgba(0, 0, 0, 0.7)',
-        },
+        sx: (theme) => ({
+          backdropFilter: theme.palette.mode === 'dark' ? 'blur(8px)' : undefined,
+          backgroundColor: alpha('#000', theme.palette.mode === 'dark' ? 0.7 : 0.4),
+        }),
       }}
     >
       {/* HEADER */}
@@ -582,24 +580,22 @@ export default function LLMExplanationModal({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+          borderBottom: 1,
+          borderColor: 'divider',
           pb: 2,
         }}
       >
         <Box>
-          <Typography variant="h5" sx={{ fontWeight: 700, color: '#f9fafb' }}>
+          <Typography variant="h5" sx={{ fontWeight: 700, color: 'text.primary' }}>
             AI Failure Explanation
           </Typography>
-          <Typography variant="body2" sx={{ color: '#9ca3af', mt: 0.5 }}>
+          <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
             Machine: {machineId} • Health: {predictionData.health_state}
           </Typography>
         </Box>
         <IconButton
           onClick={onClose}
-          sx={{
-            color: '#9ca3af',
-            '&:hover': { color: '#f9fafb', bgcolor: 'rgba(255, 255, 255, 0.1)' },
-          }}
+          sx={{ color: 'text.secondary', '&:hover': { color: 'text.primary', bgcolor: 'action.hover' } }}
         >
           <CloseIcon />
         </IconButton>
@@ -615,7 +611,8 @@ export default function LLMExplanationModal({
       {/* ACTIONS */}
       <DialogActions
         sx={{
-          borderTop: '1px solid rgba(255, 255, 255, 0.1)',
+          borderTop: 1,
+          borderColor: 'divider',
           px: 3,
           py: 2,
         }}
@@ -625,24 +622,21 @@ export default function LLMExplanationModal({
           startIcon={<CopyIcon />}
           onClick={handleCopy}
           disabled={!explanation || loading}
-          sx={{
-            borderColor: copied ? '#10b981' : '#667eea',
-            color: copied ? '#10b981' : '#667eea',
+          color={copied ? 'success' : 'primary'}
+          sx={(theme) => ({
             '&:hover': {
-              borderColor: copied ? '#059669' : '#5568d3',
-              bgcolor: copied ? 'rgba(16, 185, 129, 0.1)' : 'rgba(102, 126, 234, 0.1)',
+              bgcolor: copied
+                ? alpha(theme.palette.success.main, theme.palette.mode === 'dark' ? 0.14 : 0.1)
+                : alpha(theme.palette.primary.main, theme.palette.mode === 'dark' ? 0.14 : 0.1),
             },
-          }}
+          })}
         >
           {copied ? 'Copied!' : 'Copy to Clipboard'}
         </Button>
         <Button
           variant="contained"
           onClick={onClose}
-          sx={{
-            bgcolor: '#667eea',
-            '&:hover': { bgcolor: '#5568d3' },
-          }}
+          color="primary"
         >
           Close
         </Button>

@@ -27,6 +27,7 @@ import {
   Tooltip,
   Stack,
 } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import SearchIcon from '@mui/icons-material/Search';
 import ClearIcon from '@mui/icons-material/Clear';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
@@ -189,16 +190,19 @@ const MachineSelector: React.FC<MachineSelectorProps> = ({
           <Paper
             {...props}
             elevation={8}
-            sx={{
+            sx={(theme) => ({
               maxHeight: 400,
               overflowY: 'auto',
-              background: 'rgba(31, 41, 55, 0.95)',
-              backdropFilter: 'blur(10px)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
+              bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.95 : 0.98),
+              backdropFilter: theme.palette.mode === 'dark' ? 'blur(10px)' : undefined,
+              border: 1,
+              borderColor: 'divider',
               '& .MuiAutocomplete-listbox': {
                 '& .MuiAutocomplete-groupLabel': {
-                  backgroundColor: 'rgba(51, 65, 85, 0.8)',
-                  color: '#f1f5f9',
+                  backgroundColor: theme.palette.mode === 'dark' 
+                    ? alpha(theme.palette.background.paper, 0.9)
+                    : theme.palette.grey[100],
+                  color: 'text.primary',
                   fontWeight: 600,
                   fontSize: '0.875rem',
                   padding: '8px 16px',
@@ -207,7 +211,7 @@ const MachineSelector: React.FC<MachineSelectorProps> = ({
                   zIndex: 1,
                 },
               },
-            }}
+            })}
           />
         )}
         renderInput={(params) => (
@@ -243,18 +247,18 @@ const MachineSelector: React.FC<MachineSelectorProps> = ({
                 </>
               ),
             }}
-            sx={{
+            sx={(theme) => ({
               '& .MuiOutlinedInput-root': {
-                background: 'rgba(31, 41, 55, 0.8)',
-                backdropFilter: 'blur(10px)',
+                bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.75 : 0.95),
+                backdropFilter: theme.palette.mode === 'dark' ? 'blur(10px)' : undefined,
                 '&:hover': {
-                  background: 'rgba(31, 41, 55, 0.9)',
+                  bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.85 : 0.98),
                 },
                 '&.Mui-focused': {
-                  background: 'rgba(31, 41, 55, 0.95)',
+                  bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.9 : 1),
                 },
               },
-            }}
+            })}
           />
         )}
         renderOption={(props, option) => {
@@ -266,20 +270,21 @@ const MachineSelector: React.FC<MachineSelectorProps> = ({
             <Box
               component="li"
               {...props}
-              sx={{
+              sx={(theme) => ({
                 display: 'flex !important',
                 flexDirection: 'column',
                 alignItems: 'flex-start !important',
                 gap: 0.5,
                 padding: '12px 16px !important',
-                borderBottom: '1px solid rgba(148, 163, 184, 0.1)',
+                borderBottom: 1,
+                borderColor: 'divider',
                 '&:hover': {
-                  background: 'rgba(102, 126, 234, 0.1) !important',
+                  background: `${alpha(theme.palette.primary.main, theme.palette.mode === 'dark' ? 0.12 : 0.08)} !important`,
                 },
                 '&[aria-selected="true"]': {
-                  background: 'rgba(102, 126, 234, 0.2) !important',
+                  background: `${alpha(theme.palette.primary.main, theme.palette.mode === 'dark' ? 0.2 : 0.14)} !important`,
                 },
-              }}
+              })}
             >
               {/* Main Row: Name, Sensor Count, Status */}
               <Stack
@@ -307,13 +312,13 @@ const MachineSelector: React.FC<MachineSelectorProps> = ({
                     <Chip
                       label="Recent"
                       size="small"
-                      sx={{
+                      sx={(theme) => ({
                         ml: 1,
                         height: 20,
                         fontSize: '0.65rem',
-                        backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                        color: '#60a5fa',
-                      }}
+                        backgroundColor: alpha(theme.palette.info.main, theme.palette.mode === 'dark' ? 0.2 : 0.12),
+                        color: theme.palette.info.main,
+                      })}
                     />
                   )}
                 </Typography>
@@ -338,25 +343,17 @@ const MachineSelector: React.FC<MachineSelectorProps> = ({
                       icon={<CheckCircleIcon sx={{ fontSize: '0.875rem' }} />}
                       label="Trained"
                       size="small"
-                      sx={{
-                        backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                        color: '#10b981',
-                        fontWeight: 600,
-                        fontSize: '0.75rem',
-                        border: '1px solid rgba(16, 185, 129, 0.3)',
-                      }}
+                      color="success"
+                      variant="outlined"
+                      sx={{ fontWeight: 600, fontSize: '0.75rem' }}
                     />
                   </Tooltip>
                 ) : (
                   <Chip
                     label="No Model"
                     size="small"
-                    sx={{
-                      backgroundColor: 'rgba(100, 116, 139, 0.15)',
-                      color: '#64748b',
-                      fontSize: '0.75rem',
-                      border: '1px solid rgba(100, 116, 139, 0.3)',
-                    }}
+                    variant="outlined"
+                    sx={{ fontSize: '0.75rem', color: 'text.secondary', borderColor: 'divider' }}
                   />
                 )}
               </Stack>
@@ -393,48 +390,28 @@ const MachineSelector: React.FC<MachineSelectorProps> = ({
                   {option.has_classification_model && (
                     <Tooltip title="Classification Model">
                       <Box
-                        sx={{
-                          width: 6,
-                          height: 6,
-                          borderRadius: '50%',
-                          backgroundColor: '#667eea',
-                        }}
+                        sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: 'primary.main' }}
                       />
                     </Tooltip>
                   )}
                   {option.has_regression_model && (
                     <Tooltip title="Regression Model (RUL)">
                       <Box
-                        sx={{
-                          width: 6,
-                          height: 6,
-                          borderRadius: '50%',
-                          backgroundColor: '#10b981',
-                        }}
+                        sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: 'success.main' }}
                       />
                     </Tooltip>
                   )}
                   {option.has_anomaly_model && (
                     <Tooltip title="Anomaly Detection Model">
                       <Box
-                        sx={{
-                          width: 6,
-                          height: 6,
-                          borderRadius: '50%',
-                          backgroundColor: '#fbbf24',
-                        }}
+                        sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: 'warning.main' }}
                       />
                     </Tooltip>
                   )}
                   {option.has_timeseries_model && (
                     <Tooltip title="Timeseries Model">
                       <Box
-                        sx={{
-                          width: 6,
-                          height: 6,
-                          borderRadius: '50%',
-                          backgroundColor: '#3b82f6',
-                        }}
+                        sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: 'info.main' }}
                       />
                     </Tooltip>
                   )}

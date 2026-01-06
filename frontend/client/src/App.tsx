@@ -47,6 +47,8 @@ import {
   Settings as SettingsIcon,
 } from '@mui/icons-material';
 
+import { alpha } from '@mui/material/styles';
+
 import { SettingsProvider } from './contexts/SettingsContext';
 import NotificationProvider from './components/NotificationProvider';
 import MLDashboardPage from './pages/MLDashboardPage';
@@ -411,44 +413,45 @@ function AuthForm({ onLoggedIn }: { onLoggedIn: (user: UserInfo) => void }) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
+        bgcolor: 'background.default',
         py: 4,
       }}
     >
       <Container maxWidth="sm">
         <Paper
           elevation={24}
-          sx={{
+          sx={(theme) => ({
             p: 4,
             borderRadius: 3,
-            background: 'rgba(26, 26, 46, 0.95)',
-            backdropFilter: 'blur(10px)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-          }}
+            bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.85 : 0.95),
+            backdropFilter: theme.palette.mode === 'dark' ? 'blur(10px)' : undefined,
+            border: 1,
+            borderColor: 'divider',
+          })}
         >
           <Stack spacing={3}>
             {/* Logo & Title */}
             <Box sx={{ textAlign: 'center' }}>
               <Avatar
-                sx={{
+                sx={(theme) => ({
                   width: 72,
                   height: 72,
                   mx: 'auto',
                   mb: 2,
-                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                }}
+                  background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
+                })}
               >
                 <SettingsIcon sx={{ fontSize: 40 }} />
               </Avatar>
               <Typography
                 variant="h4"
-                sx={{
+                sx={(theme) => ({
                   fontWeight: 700,
-                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                  background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
                   backgroundClip: 'text',
                   WebkitBackgroundClip: 'text',
                   WebkitTextFillColor: 'transparent',
-                }}
+                })}
               >
                 Predictive Maintenance
               </Typography>
@@ -892,11 +895,11 @@ function App() {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
+              bgcolor: 'background.default',
             }}
           >
             <Stack spacing={2} alignItems="center">
-              <CircularProgress size={48} sx={{ color: '#667eea' }} />
+              <CircularProgress size={48} color="primary" />
               <Typography color="text.secondary">Loading...</Typography>
             </Stack>
           </Box>

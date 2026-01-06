@@ -37,6 +37,7 @@ import {
   RadioGroup,
   Radio,
 } from '@mui/material';
+import { useTheme, alpha } from '@mui/material/styles';
 import type { SelectChangeEvent } from '@mui/material';
 import {
   ExpandMore as ExpandMoreIcon,
@@ -55,6 +56,7 @@ import {
 } from '@mui/icons-material';
 import UserManagementView from './UserManagementView';
 import { useSettings, DEFAULTS_BY_SECTION } from '../../../../contexts/SettingsContext';
+import { testExternalConnection } from '../../../../api/configApi';
 
 // ============================================================================
 // Constants & Types
@@ -117,6 +119,14 @@ function setStoredValue(key: string, value: string | number | boolean): void {
 // ============================================================================
 
 export default function SettingsView({ userRole }: SettingsViewProps) {
+  const theme = useTheme();
+  const accordionSx = {
+    bgcolor: 'background.paper',
+    border: 1,
+    borderColor: 'divider',
+    '&:before': { display: 'none' },
+  } as const;
+
   // Theme Settings
   const [uiTheme, setUiTheme] = useState(() =>
     getStoredValue(SETTINGS_KEYS.UI_THEME, 'dark')
@@ -313,28 +323,11 @@ export default function SettingsView({ userRole }: SettingsViewProps) {
 
     setCheckingVlm(true);
     try {
-      // Try to reach the VLM endpoint with a simple request
-      const url = vlmEndpoint.trim().replace(/\/$/, '');
-      await fetch(`${url}/health`, {
-        method: 'GET',
-        signal: AbortSignal.timeout(5000),
-        mode: 'no-cors', // Jetson might not have CORS headers
-      });
-
-      // With no-cors, we can't read the response, but if it doesn't throw, it's reachable
-      setVlmStatus('connected');
+      // Use the centralized connection test from configApi
+      const result = await testExternalConnection(vlmEndpoint.trim());
+      setVlmStatus(result.connected ? 'connected' : 'error');
     } catch {
-      // Try without /health
-      try {
-        await fetch(vlmEndpoint.trim(), {
-          method: 'HEAD',
-          signal: AbortSignal.timeout(5000),
-          mode: 'no-cors',
-        });
-        setVlmStatus('connected');
-      } catch {
-        setVlmStatus('error');
-      }
+      setVlmStatus('error');
     } finally {
       setCheckingVlm(false);
     }
@@ -478,7 +471,7 @@ export default function SettingsView({ userRole }: SettingsViewProps) {
           variant="h4"
           sx={{
             fontWeight: 700,
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent',
             mb: 1,
@@ -486,7 +479,7 @@ export default function SettingsView({ userRole }: SettingsViewProps) {
         >
           Settings
         </Typography>
-        <Typography variant="body1" sx={{ color: '#d1d5db' }}>
+        <Typography variant="body1" sx={{ color: 'text.secondary' }}>
           Dashboard configuration and system preferences
         </Typography>
       </Box>
@@ -506,20 +499,16 @@ export default function SettingsView({ userRole }: SettingsViewProps) {
         <Accordion
           expanded={expanded === 'theme'}
           onChange={handleAccordionChange('theme')}
-          sx={{
-            background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.9) 0%, rgba(17, 24, 39, 0.9) 100%)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-            '&:before': { display: 'none' },
-          }}
+          sx={accordionSx}
         >
-          <AccordionSummary expandIcon={<ExpandMoreIcon sx={{ color: '#9ca3af' }} />}>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
             <Stack direction="row" spacing={2} alignItems="center">
-              <ThemeIcon sx={{ color: '#8b5cf6' }} />
+              <ThemeIcon sx={{ color: 'secondary.main' }} />
               <Box>
-                <Typography variant="subtitle1" sx={{ color: '#e5e7eb', fontWeight: 600 }}>
+                <Typography variant="subtitle1" sx={{ color: 'text.primary', fontWeight: 600 }}>
                   Theme & Display
                 </Typography>
-                <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                   Customize dashboard appearance
                 </Typography>
               </Box>
@@ -536,7 +525,7 @@ export default function SettingsView({ userRole }: SettingsViewProps) {
           <AccordionDetails>
             <Stack spacing={3}>
               <Box>
-                <Typography variant="body2" sx={{ color: '#9ca3af', mb: 2 }}>
+                <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
                   Select Theme
                 </Typography>
                 <RadioGroup row value={uiTheme} onChange={handleThemeChange}>
@@ -545,12 +534,12 @@ export default function SettingsView({ userRole }: SettingsViewProps) {
                     control={<Radio />}
                     label={
                       <Stack direction="row" spacing={1} alignItems="center">
-                        <DarkModeIcon sx={{ color: '#6b7280' }} />
+                        <DarkModeIcon sx={{ color: 'text.secondary' }} />
                         <Box>
-                          <Typography variant="body2" sx={{ color: '#e5e7eb' }}>
+                          <Typography variant="body2" sx={{ color: 'text.primary' }}>
                             Dark Mode
                           </Typography>
-                          <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                             Easier on eyes, recommended for extended use
                           </Typography>
                         </Box>
@@ -560,8 +549,9 @@ export default function SettingsView({ userRole }: SettingsViewProps) {
                       mr: 4,
                       p: 2,
                       borderRadius: 2,
-                      border: uiTheme === 'dark' ? '2px solid #667eea' : '1px solid rgba(255,255,255,0.1)',
-                      bgcolor: uiTheme === 'dark' ? 'rgba(102, 126, 234, 0.1)' : 'transparent',
+                      border: 1,
+                      borderColor: uiTheme === 'dark' ? 'primary.main' : 'divider',
+                      bgcolor: uiTheme === 'dark' ? alpha(theme.palette.primary.main, 0.08) : 'transparent',
                     }}
                   />
                   <FormControlLabel
@@ -569,12 +559,12 @@ export default function SettingsView({ userRole }: SettingsViewProps) {
                     control={<Radio />}
                     label={
                       <Stack direction="row" spacing={1} alignItems="center">
-                        <LightModeIcon sx={{ color: '#f59e0b' }} />
+                        <LightModeIcon sx={{ color: 'warning.main' }} />
                         <Box>
-                          <Typography variant="body2" sx={{ color: '#e5e7eb' }}>
+                          <Typography variant="body2" sx={{ color: 'text.primary' }}>
                             Light Mode
                           </Typography>
-                          <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                             Brighter interface for well-lit environments
                           </Typography>
                         </Box>
@@ -583,14 +573,15 @@ export default function SettingsView({ userRole }: SettingsViewProps) {
                     sx={{
                       p: 2,
                       borderRadius: 2,
-                      border: uiTheme === 'light' ? '2px solid #f59e0b' : '1px solid rgba(255,255,255,0.1)',
-                      bgcolor: uiTheme === 'light' ? 'rgba(245, 158, 11, 0.1)' : 'transparent',
+                      border: 1,
+                      borderColor: uiTheme === 'light' ? 'warning.main' : 'divider',
+                      bgcolor: uiTheme === 'light' ? alpha(theme.palette.warning.main, 0.08) : 'transparent',
                     }}
                   />
                 </RadioGroup>
               </Box>
 
-              <Divider sx={{ borderColor: 'rgba(255, 255, 255, 0.1)' }} />
+              <Divider />
 
               <Stack direction="row" spacing={2}>
                 <Button
@@ -632,20 +623,16 @@ export default function SettingsView({ userRole }: SettingsViewProps) {
         <Accordion
           expanded={expanded === 'autopred'}
           onChange={handleAccordionChange('autopred')}
-          sx={{
-            background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.9) 0%, rgba(17, 24, 39, 0.9) 100%)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-            '&:before': { display: 'none' },
-          }}
+          sx={accordionSx}
         >
-          <AccordionSummary expandIcon={<ExpandMoreIcon sx={{ color: '#9ca3af' }} />}>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
             <Stack direction="row" spacing={2} alignItems="center">
-              <ScheduleIcon sx={{ color: '#10b981' }} />
+              <ScheduleIcon sx={{ color: 'success.main' }} />
               <Box>
-                <Typography variant="subtitle1" sx={{ color: '#e5e7eb', fontWeight: 600 }}>
+                <Typography variant="subtitle1" sx={{ color: 'text.primary', fontWeight: 600 }}>
                   Auto-Prediction
                 </Typography>
-                <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                   Configure automatic prediction scheduling
                 </Typography>
               </Box>
@@ -670,10 +657,10 @@ export default function SettingsView({ userRole }: SettingsViewProps) {
                 }
                 label={
                   <Box>
-                    <Typography variant="body1" sx={{ color: '#e5e7eb' }}>
+                    <Typography variant="body1" sx={{ color: 'text.primary' }}>
                       Enable Auto-Prediction
                     </Typography>
-                    <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                       Automatically run predictions at regular intervals when monitoring a machine
                     </Typography>
                   </Box>
@@ -729,20 +716,16 @@ export default function SettingsView({ userRole }: SettingsViewProps) {
         <Accordion
           expanded={expanded === 'vlm'}
           onChange={handleAccordionChange('vlm')}
-          sx={{
-            background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.9) 0%, rgba(17, 24, 39, 0.9) 100%)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-            '&:before': { display: 'none' },
-          }}
+          sx={accordionSx}
         >
-          <AccordionSummary expandIcon={<ExpandMoreIcon sx={{ color: '#9ca3af' }} />}>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
             <Stack direction="row" spacing={2} alignItems="center">
-              <VideocamIcon sx={{ color: '#10b981' }} />
+              <VideocamIcon sx={{ color: 'success.main' }} />
               <Box>
-                <Typography variant="subtitle1" sx={{ color: '#e5e7eb', fontWeight: 600 }}>
+                <Typography variant="subtitle1" sx={{ color: 'text.primary', fontWeight: 600 }}>
                   VLM / Jetson Integration
                 </Typography>
-                <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                   Configure Vision Language Model endpoint (Jetson Orin Nano)
                 </Typography>
               </Box>
@@ -760,8 +743,8 @@ export default function SettingsView({ userRole }: SettingsViewProps) {
           <AccordionDetails>
             <Stack spacing={3}>
               <Alert severity="info" sx={{ mb: 1 }}>
-                Configure the endpoint URL for your Jetson Orin Nano running the VLM inference service.
-                This will be used for visual machine monitoring integration.
+                Configure the endpoint URL for your VLM inference device (e.g., Jetson, Raspberry Pi, or any edge device).
+                This will be used for visual machine monitoring integration. The endpoint is stored locally.
               </Alert>
 
               <TextField
@@ -769,12 +752,12 @@ export default function SettingsView({ userRole }: SettingsViewProps) {
                 value={vlmEndpoint}
                 onChange={(e) => setVlmEndpoint(e.target.value)}
                 fullWidth
-                placeholder="http://192.168.1.100:8080"
-                helperText="Enter the base URL of your Jetson VLM service"
+                placeholder="http://<device-ip>:<port>"
+                helperText="Enter the base URL of your VLM service (dynamically configured)"
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
-                      <VideocamIcon sx={{ color: '#6b7280' }} />
+                      <VideocamIcon color="action" />
                     </InputAdornment>
                   ),
                 }}
@@ -823,20 +806,16 @@ export default function SettingsView({ userRole }: SettingsViewProps) {
         <Accordion
           expanded={expanded === 'llm'}
           onChange={handleAccordionChange('llm')}
-          sx={{
-            background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.9) 0%, rgba(17, 24, 39, 0.9) 100%)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-            '&:before': { display: 'none' },
-          }}
+          sx={accordionSx}
         >
-          <AccordionSummary expandIcon={<ExpandMoreIcon sx={{ color: '#9ca3af' }} />}>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
             <Stack direction="row" spacing={2} alignItems="center">
-              <LLMIcon sx={{ color: '#f59e0b' }} />
+              <LLMIcon sx={{ color: 'warning.main' }} />
               <Box>
-                <Typography variant="subtitle1" sx={{ color: '#e5e7eb', fontWeight: 600 }}>
+                <Typography variant="subtitle1" sx={{ color: 'text.primary', fontWeight: 600 }}>
                   LLM Runtime Controls
                 </Typography>
-                <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                   Configure Large Language Model inference parameters
                 </Typography>
               </Box>
@@ -861,20 +840,20 @@ export default function SettingsView({ userRole }: SettingsViewProps) {
                 }
                 label={
                   <Box>
-                    <Typography variant="body1" sx={{ color: '#e5e7eb' }}>
+                    <Typography variant="body1" sx={{ color: 'text.primary' }}>
                       Enable LLM Explanations
                     </Typography>
-                    <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                       When disabled, predictions will run without AI-generated explanations (faster)
                     </Typography>
                   </Box>
                 }
               />
 
-              <Divider sx={{ borderColor: 'rgba(255, 255, 255, 0.1)' }} />
+              <Divider />
 
               <Box>
-                <Typography variant="body2" sx={{ color: '#9ca3af', mb: 2 }}>
+                <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
                   Temperature: {llmTemperature.toFixed(2)}
                 </Typography>
                 <Slider
@@ -890,8 +869,7 @@ export default function SettingsView({ userRole }: SettingsViewProps) {
                     { value: 1, label: '1 (Creative)' },
                   ]}
                   sx={{
-                    color: '#667eea',
-                    '& .MuiSlider-markLabel': { color: '#6b7280', fontSize: '0.75rem' },
+                    '& .MuiSlider-markLabel': { color: 'text.secondary', fontSize: '0.75rem' },
                   }}
                 />
               </Box>
@@ -943,20 +921,16 @@ export default function SettingsView({ userRole }: SettingsViewProps) {
         <Accordion
           expanded={expanded === 'notifications'}
           onChange={handleAccordionChange('notifications')}
-          sx={{
-            background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.9) 0%, rgba(17, 24, 39, 0.9) 100%)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-            '&:before': { display: 'none' },
-          }}
+          sx={accordionSx}
         >
-          <AccordionSummary expandIcon={<ExpandMoreIcon sx={{ color: '#9ca3af' }} />}>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
             <Stack direction="row" spacing={2} alignItems="center">
-              <NotificationIcon sx={{ color: '#ec4899' }} />
+              <NotificationIcon sx={{ color: 'secondary.main' }} />
               <Box>
-                <Typography variant="subtitle1" sx={{ color: '#e5e7eb', fontWeight: 600 }}>
+                <Typography variant="subtitle1" sx={{ color: 'text.primary', fontWeight: 600 }}>
                   Notifications
                 </Typography>
-                <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                   Configure alerts and notification preferences
                 </Typography>
               </Box>
@@ -981,10 +955,10 @@ export default function SettingsView({ userRole }: SettingsViewProps) {
                 }
                 label={
                   <Box>
-                    <Typography variant="body1" sx={{ color: '#e5e7eb' }}>
+                    <Typography variant="body1" sx={{ color: 'text.primary' }}>
                       Enable Notifications
                     </Typography>
-                    <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                       Show toast notifications for prediction results and system events
                     </Typography>
                   </Box>
@@ -1002,10 +976,10 @@ export default function SettingsView({ userRole }: SettingsViewProps) {
                 }
                 label={
                   <Box>
-                    <Typography variant="body1" sx={{ color: notificationsEnabled ? '#e5e7eb' : '#6b7280' }}>
+                    <Typography variant="body1" sx={{ color: notificationsEnabled ? 'text.primary' : 'text.disabled' }}>
                       Sound Alerts
                     </Typography>
-                    <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                       Play audio for critical alerts (requires browser permission)
                     </Typography>
                   </Box>
@@ -1023,10 +997,10 @@ export default function SettingsView({ userRole }: SettingsViewProps) {
                 }
                 label={
                   <Box>
-                    <Typography variant="body1" sx={{ color: notificationsEnabled ? '#e5e7eb' : '#6b7280' }}>
+                    <Typography variant="body1" sx={{ color: notificationsEnabled ? 'text.primary' : 'text.disabled' }}>
                       Critical Alerts Only
                     </Typography>
-                    <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                       Only show notifications for critical/failure predictions
                     </Typography>
                   </Box>
@@ -1060,20 +1034,16 @@ export default function SettingsView({ userRole }: SettingsViewProps) {
         <Accordion
           expanded={expanded === 'data'}
           onChange={handleAccordionChange('data')}
-          sx={{
-            background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.9) 0%, rgba(17, 24, 39, 0.9) 100%)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-            '&:before': { display: 'none' },
-          }}
+          sx={accordionSx}
         >
-          <AccordionSummary expandIcon={<ExpandMoreIcon sx={{ color: '#9ca3af' }} />}>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
             <Stack direction="row" spacing={2} alignItems="center">
-              <DataIcon sx={{ color: '#14b8a6' }} />
+              <DataIcon sx={{ color: 'primary.main' }} />
               <Box>
-                <Typography variant="subtitle1" sx={{ color: '#e5e7eb', fontWeight: 600 }}>
+                <Typography variant="subtitle1" sx={{ color: 'text.primary', fontWeight: 600 }}>
                   Data & Export
                 </Typography>
-                <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                   Configure data display limits and export preferences
                 </Typography>
               </Box>
@@ -1081,7 +1051,7 @@ export default function SettingsView({ userRole }: SettingsViewProps) {
           </AccordionSummary>
           <AccordionDetails>
             <Stack spacing={3}>
-              <Typography variant="body2" sx={{ color: '#9ca3af', fontWeight: 600 }}>
+              <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 600 }}>
                 Display Limits
               </Typography>
 
@@ -1103,9 +1073,9 @@ export default function SettingsView({ userRole }: SettingsViewProps) {
                 inputProps={{ min: 10, max: 200 }}
               />
 
-              <Divider sx={{ borderColor: 'rgba(255, 255, 255, 0.1)' }} />
+              <Divider />
 
-              <Typography variant="body2" sx={{ color: '#9ca3af', fontWeight: 600 }}>
+              <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 600 }}>
                 Export Preferences
               </Typography>
 
@@ -1132,10 +1102,10 @@ export default function SettingsView({ userRole }: SettingsViewProps) {
                 }
                 label={
                   <Box>
-                    <Typography variant="body1" sx={{ color: '#e5e7eb' }}>
+                    <Typography variant="body1" sx={{ color: 'text.primary' }}>
                       Include Timestamps
                     </Typography>
-                    <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                       Add ISO timestamps to exported data files
                     </Typography>
                   </Box>
@@ -1171,8 +1141,9 @@ export default function SettingsView({ userRole }: SettingsViewProps) {
             elevation={3}
             sx={{
               p: 0,
-              background: 'linear-gradient(135deg, rgba(31, 41, 55, 0.9) 0%, rgba(17, 24, 39, 0.9) 100%)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
+              bgcolor: 'background.paper',
+              border: 1,
+              borderColor: 'divider',
             }}
           >
             <UserManagementView userRole={userRole} />
